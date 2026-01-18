@@ -21,15 +21,17 @@ PHASE 2: BASELINE MEASUREMENT
 1. **REPORT:** Use `build-subagent` to run the baseline coverage report.
 2. **ANALYZE:** Use `coverage-subagent` to read the baseline metrics.
 
-PHASE 3: ITERATIVE IMPROVEMENT (Max 3 iterations)
-1. **CANDIDATE:** Pick target classes.
-2. **GENERATE:** Use `test-writer-subagent` to create/repair tests (ONE class at a time).
-3. **VERIFY:** Use `build-subagent` to verify.
-4. **MEASURE:** Use `coverage-subagent` to check progress.
+PHASE 3: BATCH IMPROVEMENT (Max 3 Batches)
+1. **CANDIDATES:** Identify the top 3 target classes that need improvement.
+2. **GENERATE:** Call `test-writer-subagent` in PARALLEL for all 3 candidates to create/repair tests.
+3. **VERIFY:** Use `build-subagent` ONCE to verify the changes for the entire batch.
+4. **MEASURE:** Use `coverage-subagent` ONCE to check progress and update metrics.
 """
 
 ORCHESTRATOR_RULES = """
 - **ORCHESTRATION:** You manage specialized sub-agents. Delegate deep work to them.
+- **PARALLELISM:** You are authorized and encouraged to run independent sub-agent tasks in parallel (e.g., generating tests for multiple classes simultaneously).
+- **BATCHING:** In Phase 3, wait for all test generation tasks to complete before running the build.
 - **METRICS:** Summarize timings and iterations in your final answer.
 - **STOPPING:** Stop if target reached or stalled.
 
