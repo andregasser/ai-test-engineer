@@ -1,18 +1,31 @@
 from pathlib import Path
 from langchain_core.tools import tool
 from shared_utils.prompt_utils import get_inherited_prompt
+from shared_utils.schema_utils import TestWriterAgentOutput
+import json
 
-@tool
-def read_testing_standards(project_root: str) -> str:
+TEST_WRITER_ROLE = "You are a Java/JUnit test generation agent. Your goal is to generate robust JUnit 5 tests to improve coverage."
+
+# Updated Protocol: Removed the step to call the tool, as standards are now injected.
+TEST_WRITER_PROTOCOL = """
+1. **CONTEXT:** Use `inspect_java_class` to get the production code and existing tests.
+2. **ANALYSIS:** Review the code against the **PROJECT TESTING STANDARDS** provided below.
+3. **ONE-SHOT GENERATION:** Generate the ENTIRE test class.
+"""
+
+TEST_WRITER_RULES = """
+- **NO PRODUCTION MODS:** Only write files under src/test/java.
+- **EXISTING TESTS:** If `inspect_java_class` returns an existing test, preserve its useful parts. Do not duplicate test methods.
+- **STANDARDS:** You must strictly follow the PROJECT TESTING STANDARDS section.
+- **STRICT TAGGING:** Every single test method AND the test class itself MUST be annotated with `@Tag("ai-generated")`. This is mandatory.
+
+**OUTPUT FORMAT:**
+To finish your task, you **MUST** call the `submit_test_writer_output` tool. This is the only way to return your result. Refer to the tool's definition for the required arguments.
+"""
+
+def _read_standards(project_root: str) -> str:
     """
-    Finds and reads the 'TESTING_STANDARDS.md' file in the project.
-    It searches the root and subdirectories to ensure it finds the correct file.
-    
-    Args:
-        project_root: The root directory of the project.
-        
-    Returns:
-        The content of the testing standards file, or a default message if not found.
+    Finds and reads the 'TESTING_STANDARDS.md' file.
     """
     try:
         root = Path(project_root)
@@ -119,27 +132,25 @@ def inspect_java_class(class_name: str, project_root: str) -> str:
     except Exception as e:
         return f"Error inspecting class: {str(e)}"
 
-TEST_WRITER_ROLE = "You are a Java/JUnit test generation agent. Your goal is to generate robust JUnit 5 tests to improve coverage."
+@tool(args_schema=TestWriterAgentOutput)
+def submit_test_writer_output(**kwargs):
+    """Finalizes the Test Writer agent's work and returns the structured result."""
+    return kwargs
 
-TEST_WRITER_PROTOCOL = """
-1. **INITIALIZATION (Mandatory):** Call `read_testing_standards` to load the project's testing rules.
-2. **CONTEXT:** Use `inspect_java_class` to get the production code and existing tests.
-3. **ANALYSIS:** Review the code against the standards loaded in step 1.
-4. **ONE-SHOT GENERATION:** Generate the ENTIRE test class.
-"""
-
-TEST_WRITER_RULES = """
-- **NO PRODUCTION MODS:** Only write files under src/test/java.
-- **EXISTING TESTS:** If `inspect_java_class` returns an existing test, preserve its useful parts. Do not duplicate test methods.
-- **STANDARDS:** You must strictly follow the standards returned by the `read_testing_standards` tool.
-- **STRICT TAGGING:** Every single test method AND the test class itself MUST be annotated with `@Tag("ai-generated")`. This is mandatory.
-"""
-
-TEST_WRITER_SYSTEM_PROMPT = get_inherited_prompt(TEST_WRITER_ROLE, TEST_WRITER_PROTOCOL, TEST_WRITER_RULES)
-
-TEST_WRITER_SUBAGENT = {
-    "name": "test-writer-subagent",
-    "description": "Writes and repairs JUnit 5 tests for Java classes.",
-    "system_prompt": TEST_WRITER_SYSTEM_PROMPT,
-    "tools": [read_testing_standards, inspect_java_class],
-}
+def get_test_writer_subagent(project_root: str):
+    """
+    Factory function to create the Test Writer Subagent.
+    Injects the TESTING_STANDARDS.md content directly into the system prompt.
+    """
+    standards_content = _read_standards(project_root)
+    
+    # Combine inherited prompt with injected standards
+    base_prompt = get_inherited_prompt(TEST_WRITER_ROLE, TEST_WRITER_PROTOCOL, TEST_WRITER_RULES)
+    final_prompt = f"{base_prompt}\n\n{standards_content}"
+    
+    return {
+        "name": "test-writer-subagent",
+        "description": "Writes and repairs JUnit 5 tests for Java classes.",
+        "system_prompt": final_prompt,
+        "tools": [inspect_java_class, submit_test_writer_output],
+    }

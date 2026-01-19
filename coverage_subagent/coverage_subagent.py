@@ -2,11 +2,24 @@ from concurrent.futures import ProcessPoolExecutor
 import xml.etree.ElementTree as ET
 from pathlib import Path
 import re
-
 from langchain_core.tools import tool
-
 from shared_utils.prompt_utils import get_inherited_prompt
 from shared_utils.schema_utils import CoverageSummaryResponse
+from shared_utils.schema_utils import CoverageAgentOutput
+
+COVERAGE_ROLE = "You are a coverage analysis agent for a Java/Gradle project."
+
+COVERAGE_PROTOCOL = "1. Analyze coverage using `read_coverage_report`. Use the `target_classes` parameter to verify specific improvements in batch."
+
+COVERAGE_RULES = """
+- **GAP IDENTIFICATION:** Beyond returning metrics, identify specific 'Hotspot Methods' (methods with 0% coverage in a low-coverage class) to give the Test Writer a clear target.
+- **IMPROVEMENT VERIFICATION:** Explicitly compare the current line/branch counts with the previous iteration to calculate the exact percentage-point delta achieved.
+- **ONLY READ:** You do NOT run builds. 
+- **NO OTHER TOOLS:** Do NOT attempt other tools.
+- **OUTPUT FORMAT:** To finish your task, you **MUST** call the `submit_coverage_output` tool. This is the only way to return your result. Refer to the tool's definition for the required arguments.
+"""
+
+COVERAGE_SYSTEM_PROMPT = get_inherited_prompt(COVERAGE_ROLE, COVERAGE_PROTOCOL, COVERAGE_RULES)
 
 def _parse_single_report(report_path: Path):
     """Function to parse a single JaCoCo report."""
@@ -132,19 +145,16 @@ def read_coverage_report(project_root: str, target_classes: str = None) -> Cover
     except Exception as e:
         return CoverageSummaryResponse(success=False, error=str(e))
 
-COVERAGE_ROLE = "You are a coverage analysis agent for a Java/Gradle project."
-COVERAGE_PROTOCOL = "1. Analyze coverage using `read_coverage_report`. Use the `target_classes` parameter to verify specific improvements in batch."
-COVERAGE_RULES = """
-- **GAP IDENTIFICATION:** Beyond returning metrics, identify specific 'Hotspot Methods' (methods with 0% coverage in a low-coverage class) to give the Test Writer a clear target.
-- **IMPROVEMENT VERIFICATION:** Explicitly compare the current line/branch counts with the previous iteration to calculate the exact percentage-point delta achieved.
-- **ONLY READ:** You do NOT run builds. - **NO OTHER TOOLS:** Do NOT attempt other tools.
-"""
+@tool(args_schema=CoverageAgentOutput)
+def submit_coverage_output(**kwargs):
+    """Finalizes the Coverage agent's work and returns the structured result."""
+    return kwargs
 
-COVERAGE_SYSTEM_PROMPT = get_inherited_prompt(COVERAGE_ROLE, COVERAGE_PROTOCOL, COVERAGE_RULES)
-
-COVERAGE_SUBAGENT = {
-    "name": "coverage-subagent",
-    "description": "Parses and analyzes JaCoCo coverage reports.",
-    "system_prompt": COVERAGE_SYSTEM_PROMPT,
-    "tools": [read_coverage_report],
-}
+def get_coverage_subagent():
+    """Factory function to create the Coverage Subagent."""
+    return {
+        "name": "coverage-subagent",
+        "description": "Parses and analyzes JaCoCo coverage reports.",
+        "system_prompt": COVERAGE_SYSTEM_PROMPT,
+        "tools": [read_coverage_report, submit_coverage_output],
+    }

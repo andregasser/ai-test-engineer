@@ -1,14 +1,13 @@
 from typing import Dict, Any
-import time
 import json
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 
 from deepagents import create_deep_agent
-from git_subagent.git_subagent import GIT_SUBAGENT
-from test_writer_subagent.test_writer_subagent import TEST_WRITER_SUBAGENT
-from coverage_subagent.coverage_subagent import COVERAGE_SUBAGENT
-from build_subagent.build_subagent import BUILD_SUBAGENT
+from git_subagent.git_subagent import get_git_subagent
+from test_writer_subagent.test_writer_subagent import get_test_writer_subagent
+from coverage_subagent.coverage_subagent import get_coverage_subagent
+from build_subagent.build_subagent import get_build_subagent
 
 from shared_utils.prompt_utils import get_inherited_prompt
 from shared_utils.model_utils import GEMINI_FLASH_3_PREVIEW_MODEL
@@ -63,14 +62,6 @@ Final answer MUST be a raw JSON string (no markdown formatting) matching the fol
 
 ORCHESTRATOR_SYSTEM_PROMPT = get_inherited_prompt(ORCHESTRATOR_ROLE, ORCHESTRATOR_PROTOCOL, ORCHESTRATOR_RULES)
 
-# Sub-agents registry
-SUBAGENTS = [
-    GIT_SUBAGENT,
-    TEST_WRITER_SUBAGENT,
-    BUILD_SUBAGENT,
-    COVERAGE_SUBAGENT
-]
-
 def handle_orchestrator_error(input_state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Fallback handler that returns a graceful failure JSON when the agent crashes (e.g. LLM overload).
@@ -103,11 +94,19 @@ def handle_orchestrator_error(input_state: Dict[str, Any]) -> Dict[str, Any]:
 def get_orchestrator_agent(project_root: str):
     middleware, backend = get_agent_runtime(project_root)
     
+    # Dynamically create subagents
+    subagents = [
+        get_git_subagent(),
+        get_test_writer_subagent(project_root),
+        get_build_subagent(),
+        get_coverage_subagent()
+    ]
+    
     agent = create_deep_agent(
         model=GEMINI_FLASH_3_PREVIEW_MODEL,
         tools=[], 
         system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
-        subagents=SUBAGENTS,
+        subagents=subagents,
         middleware=middleware,
         backend=backend
     )

@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 class ToolResponse(BaseModel):
     """Base class for all tool responses."""
@@ -27,3 +27,37 @@ class AgentReport(BaseModel):
     total_iterations: int = Field(..., description="Number of improvement cycles run.")
     duration_seconds: float = Field(..., description="Total execution time.")
     termination_reason: str = Field(..., description="Why the agent stopped (e.g., 'Target Reached', 'Max Iterations').")
+
+# --- Sub-Agent Output Models ---
+
+class GitAgentOutput(BaseModel):
+    """Structured output for the Git Sub-Agent."""
+    status: str = Field(..., description="'success' or 'failure'")
+    repo_path: str = Field(..., description="Local path to the cloned/checked-out repository.")
+    current_branch: str = Field(..., description="The currently active branch.")
+    commit_hash: Optional[str] = Field(None, description="The HEAD commit hash.")
+    error_message: Optional[str] = Field(None, description="Error details if status is failure.")
+
+class TestWriterAgentOutput(BaseModel):
+    """Structured output for the Test Writer Sub-Agent."""
+    status: str = Field(..., description="'success' or 'failure'")
+    files_created: List[str] = Field(default_factory=list, description="List of test files created or modified.")
+    classes_covered: List[str] = Field(default_factory=list, description="List of production classes targeted.")
+    compilation_status: Optional[str] = Field(None, description="predicted compilation status (not verified).")
+    error_message: Optional[str] = Field(None, description="Error details if generation failed.")
+
+class BuildAgentOutput(BaseModel):
+    """Structured output for the Build Sub-Agent."""
+    status: str = Field(..., description="'success' or 'failure'")
+    scope: str = Field(..., description="Scope of the build (e.g., 'module::service-a', 'class::MyTest').")
+    exit_code: int = Field(..., description="Process exit code.")
+    failed_tests: List[str] = Field(default_factory=list, description="List of failed test methods (Class.method).")
+    commands_run: List[str] = Field(default_factory=list, description="List of shell commands executed.")
+    summary: str = Field(..., description="Brief summary of the build result.")
+
+class CoverageAgentOutput(BaseModel):
+    """Structured output for the Coverage Sub-Agent."""
+    module: str = Field(..., description="The module or scope analyzed.")
+    overall_coverage: float = Field(..., description="Overall line coverage (0.0 to 1.0) for the scope.")
+    by_class: Dict[str, float] = Field(default_factory=dict, description="Mapping of FQN to coverage float (0.0 to 1.0).")
+    hotspots: List[str] = Field(default_factory=list, description="List of methods with 0% coverage to target.")
