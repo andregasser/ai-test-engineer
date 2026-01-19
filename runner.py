@@ -60,7 +60,7 @@ if __name__ == "__main__":
     # --- CONFIGURATION SECTION ---
     # Repo details
     REPO_URL = "ssh://git@code.swisscom.com:2222/swisscom/tsp/my-ai/backend/myai-integration-backend.git"
-    BRANCH = "feature/acm-service-ai-tests-2026-01-18"
+    BRANCH = "feature/acm-service-ai-tests-2026-01-19"
     TARGET_COVERAGE = 1.00
 
     # Scope control:
