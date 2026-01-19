@@ -14,7 +14,7 @@ def get_agent_runtime(project_root: str):
     backend = HostSandboxBackend(root_dir=project_root)
     
     middleware = [
-        ModelCallLimitMiddleware(run_limit=25, exit_behavior="end"),
+        ModelCallLimitMiddleware(run_limit=100, exit_behavior="end"),
         ModelRetryMiddleware(max_retries=3),
         ToolRetryMiddleware(max_retries=3),
         ShellToolMiddleware(

@@ -45,11 +45,12 @@ def _parse_single_report(report_path: Path):
         return None
 
 @tool
-def read_coverage_report(project_root: str) -> CoverageSummaryResponse:
+def read_coverage_report(project_root: str, target_classes: str = None) -> CoverageSummaryResponse:
     """
     Parses JaCoCo XML reports. 
     It checks TESTING_STANDARDS.md for custom report locations first.
     project_root should be the path to the project directory.
+    target_classes: Optional comma-separated list of simple or fully qualified class names to filter results (e.g. "UserService, AuthController").
     """
     try:
         root = Path(project_root)
@@ -91,21 +92,37 @@ def read_coverage_report(project_root: str) -> CoverageSummaryResponse:
                 total_branches_missed += res["branches_missed"]; total_branches_covered += res["branches_covered"]
                 all_classes_data.extend(res["class_data"])
         
+        # Filtering Logic
+        filtered_classes = []
+        if target_classes:
+            targets = [t.strip() for t in target_classes.split(",") if t.strip()]
+            for c_name, cov in all_classes_data:
+                # Check if c_name matches ANY target
+                is_match = False
+                for t in targets:
+                    if c_name == t or c_name.endswith("." + t):
+                        is_match = True
+                        break
+                if is_match:
+                    filtered_classes.append((c_name, cov))
+        else:
+            # Default behavior: worst 20
+            filtered_classes = sorted(all_classes_data, key=lambda x: x[1])[:20]
+
         overall_line = total_lines_covered / (total_lines_missed + total_lines_covered) if (total_lines_missed + total_lines_covered) > 0 else 0.0
         overall_branch = total_branches_covered / (total_branches_missed + total_branches_covered) if (total_branches_missed + total_branches_covered) > 0 else 0.0
-        worst_sorted = sorted(all_classes_data, key=lambda x: x[1])[:20]
         
         return CoverageSummaryResponse(
             success=True, 
             line_coverage=overall_line, 
             branch_coverage=overall_branch, 
-            worst_classes=[c for c, _ in worst_sorted]
+            worst_classes=[c for c, _ in filtered_classes]
         )
     except Exception as e:
         return CoverageSummaryResponse(success=False, error=str(e))
 
 COVERAGE_ROLE = "You are a coverage analysis agent for a Java/Gradle project."
-COVERAGE_PROTOCOL = "1. Analyze coverage using `read_coverage_report`. This tool prioritizes paths defined in TESTING_STANDARDS.md."
+COVERAGE_PROTOCOL = "1. Analyze coverage using `read_coverage_report`. Use the `target_classes` parameter to verify specific improvements in batch."
 COVERAGE_RULES = """
 - **GAP IDENTIFICATION:** Beyond returning metrics, identify specific 'Hotspot Methods' (methods with 0% coverage in a low-coverage class) to give the Test Writer a clear target.
 - **IMPROVEMENT VERIFICATION:** Explicitly compare the current line/branch counts with the previous iteration to calculate the exact percentage-point delta achieved.

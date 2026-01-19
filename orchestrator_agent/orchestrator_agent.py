@@ -23,9 +23,9 @@ PHASE 2: BASELINE MEASUREMENT
 
 PHASE 3: BATCH IMPROVEMENT (Max 3 Batches)
 1. **CANDIDATES:** Identify the top 3 target classes that need improvement.
-2. **GENERATE:** Call `test-writer-subagent` in PARALLEL for all 3 candidates to create/repair tests.
-3. **VERIFY:** Use `build-subagent` ONCE to verify the changes for the entire batch.
-4. **MEASURE:** Use `coverage-subagent` ONCE to check progress and update metrics.
+2. **GENERATE:** Call `test-writer-subagent` for all 3 candidates SIMULTANEOUSLY. You MUST output 3 separate tool calls in the same response turn. Do NOT wait for one to finish before starting the next. Pass the EXACT class name to `inspect_java_class`.
+3. **VERIFY:** Use `build-subagent` ONCE to verify the changes. Prefer targeted tests (e.g. `:module:test --tests ClassTest`) over full builds.
+4. **MEASURE:** Use `coverage-subagent` with `target_classes` parameter (comma-separated) to verify improvements for the specific batch of candidates in one go.
 """
 
 ORCHESTRATOR_RULES = """
