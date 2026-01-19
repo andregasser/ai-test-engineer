@@ -36,7 +36,13 @@ ORCHESTRATOR_RULES = """
 - **PARALLELISM:** You are authorized and encouraged to run independent sub-agent tasks in parallel (e.g., generating tests for multiple classes simultaneously).
 - **BATCHING:** In Phase 3, wait for all test generation tasks to complete before running the build.
 - **METRICS:** Summarize timings and iterations in your final answer.
-- **STOPPING:** Stop if target reached or stalled.
+- **STOPPING CRITERIA (STRICT):**
+  1. **SUCCESS:** Stop if `final_coverage` >= `target_coverage` (as defined in input). Set termination_reason="target_met".
+  2. **STALLED:** Stop if:
+     - Coverage does not increase by at least 0.01 (1%) across two consecutive measurement cycles.
+     - OR The last 2 builds fail with the same error.
+     - Set termination_reason="stalled_no_progress".
+  3. **LIMIT:** Never perform more than 3 improvement batches. If you complete Batch 3 and target is not met, stop immediately. Set termination_reason="max_batches_reached".
 
 Final answer MUST be a raw JSON string (no markdown formatting) matching the following schema:
 {
