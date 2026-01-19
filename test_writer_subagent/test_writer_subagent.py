@@ -132,6 +132,7 @@ TEST_WRITER_RULES = """
 - **NO PRODUCTION MODS:** Only write files under src/test/java.
 - **EXISTING TESTS:** If `inspect_java_class` returns an existing test, preserve its useful parts. Do not duplicate test methods.
 - **STANDARDS:** You must strictly follow the standards returned by the `read_testing_standards` tool.
+- **STRICT TAGGING:** Every single test method AND the test class itself MUST be annotated with `@Tag("ai-generated")`. This is mandatory.
 """
 
 TEST_WRITER_SYSTEM_PROMPT = get_inherited_prompt(TEST_WRITER_ROLE, TEST_WRITER_PROTOCOL, TEST_WRITER_RULES)
