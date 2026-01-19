@@ -25,10 +25,12 @@ PHASE 2: BASELINE MEASUREMENT
 2. **ANALYZE:** Use `coverage-subagent` to read the baseline metrics.
 
 PHASE 3: BATCH IMPROVEMENT (Max 3 Batches)
-1. **CANDIDATES:** Identify the top 3 target classes that need improvement.
-2. **GENERATE:** Call `test-writer-subagent` for all 3 candidates SIMULTANEOUSLY. You MUST output 3 separate tool calls in the same response turn. Do NOT wait for one to finish before starting the next. Pass the EXACT class name to `inspect_java_class`.
-3. **VERIFY:** Use `build-subagent` ONCE to verify the changes. Prefer targeted tests (e.g. `:module:test --tests ClassTest`) over full builds.
-4. **MEASURE:** Use `coverage-subagent` with `target_classes` parameter (comma-separated) to verify improvements for the specific batch of candidates in one go.
+Execute the following loop up to 3 times:
+1. **CANDIDATES:** Use coverage data to select the top 3 worst classes (prioritize services/acm-service).
+2. **GENERATE:** Call `test-writer-subagent` for all 3 candidates SIMULTANEOUSLY using their EXACT Fully Qualified Class Names (FQN). You MUST output 3 separate tool calls in the same response turn.
+3. **VERIFY:** Wait for all 3 writers to finish. Run ONE targeted build/test command (e.g. `:module:test --tests "Package.*"`) that covers these classes.
+4. **MEASURE:** Run `coverage-subagent` with `target_classes` set to the comma-separated list of the 3 classes.
+5. **DECIDE:** Record per-class improvement. If target met or stalled, stop. Else continue to next batch.
 """
 
 ORCHESTRATOR_RULES = """
