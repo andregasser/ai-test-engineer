@@ -38,19 +38,47 @@ def run_coverage_optimization(repo_url: str, branch: str | None, target_coverage
     instruction += f"\n- REQUIRED TEST TYPE: {test_type}"
     instruction += "\n- IMPORTANT: Strictly follow the standards in TESTING_STANDARDS.md."
 
-    result = orchestrator_agent.invoke(
-        {
-            "messages": [("user", instruction)],
-            "repo_url": repo_url,
-            "branch": branch,
-            "target_coverage": target_coverage,
-            "target_modules": target_modules,
-            "target_packages": target_packages,
-            "target_classes": target_classes,
-            "test_type": test_type,
-        },
-        config={"recursion_limit": 500}
-    )
+    max_retries = 3
+    retry_delay = 60  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            result = orchestrator_agent.invoke(
+                {
+                    "messages": [("user", instruction)],
+                    "repo_url": repo_url,
+                    "branch": branch,
+                    "target_coverage": target_coverage,
+                    "target_modules": target_modules,
+                    "target_packages": target_packages,
+                    "target_classes": target_classes,
+                    "test_type": test_type,
+                },
+                config={"recursion_limit": 500}
+            )
+
+            # Check for specific termination reason in the output
+            if result and "messages" in result and result["messages"]:
+                last_content = result["messages"][-1].content
+                # Simple string check to avoid full parse overhead inside the loop, 
+                # but could use json.loads if preferred for robustness.
+                if '"termination_reason": "model_overloaded"' in last_content:
+                    if attempt < max_retries - 1:
+                        print(f"⚠️  Model overloaded. Retrying in {retry_delay}s... (Attempt {attempt + 1}/{max_retries})")
+                        time.sleep(retry_delay)
+                        continue
+            
+            return result
+
+        except Exception as e:
+            # Optional: Catch specific transport errors here if they bubble up
+            print(f"❌ An error occurred during execution: {e}")
+            if attempt < max_retries - 1:
+                 print(f"🔄 Retrying in {retry_delay}s... (Attempt {attempt + 1}/{max_retries})")
+                 time.sleep(retry_delay)
+            else:
+                 raise e
+    
     return result
 
 

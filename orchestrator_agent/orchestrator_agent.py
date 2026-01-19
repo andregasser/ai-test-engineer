@@ -1,5 +1,8 @@
 from typing import Dict, Any
 import time
+import json
+from langchain_core.messages import AIMessage
+from langchain_core.runnables import RunnableLambda
 
 from deepagents import create_deep_agent
 from git_subagent.git_subagent import GIT_SUBAGENT
@@ -59,10 +62,39 @@ SUBAGENTS = [
     COVERAGE_SUBAGENT
 ]
 
+def handle_orchestrator_error(input_state: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Fallback handler that returns a graceful failure JSON when the agent crashes (e.g. LLM overload).
+    """
+    failure_data = {
+        "initial_coverage": 0.0,
+        "final_coverage": 0.0,
+        "coverage_delta": 0.0,
+        "classes_targeted": [],
+        "classes_improved": [],
+        "classes_failed": [],
+        "total_iterations": 0,
+        "duration_seconds": 0.0,
+        "termination_reason": "model_overloaded"
+    }
+    
+    # Ensure messages list exists
+    messages = input_state.get("messages", [])
+    if not isinstance(messages, list):
+        messages = [messages] if messages else []
+        
+    # Append the failure message as an AIMessage, mimicking the agent's final response
+    failure_message = AIMessage(content=json.dumps(failure_data))
+    
+    return {
+        **input_state,
+        "messages": messages + [failure_message]
+    }
+
 def get_orchestrator_agent(project_root: str):
     middleware, backend = get_agent_runtime(project_root)
     
-    return create_deep_agent(
+    agent = create_deep_agent(
         model=GEMINI_FLASH_3_PREVIEW_MODEL,
         tools=[], 
         system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
@@ -70,3 +102,5 @@ def get_orchestrator_agent(project_root: str):
         middleware=middleware,
         backend=backend
     )
+    
+    return agent.with_fallbacks([RunnableLambda(handle_orchestrator_error)])
