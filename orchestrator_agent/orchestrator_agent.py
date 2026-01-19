@@ -28,7 +28,7 @@ PHASE 3: BATCH IMPROVEMENT (Max 3 Batches)
 Execute the following loop up to 3 times:
 1. **CANDIDATES:** Use coverage data to select the top 3 worst classes (prioritize services/acm-service).
 2. **GENERATE:** Call `test-writer-subagent` for all 3 candidates SIMULTANEOUSLY using their EXACT Fully Qualified Class Names (FQN). You MUST output 3 separate tool calls in the same response turn.
-3. **VERIFY:** Wait for all 3 writers to finish. Run ONE targeted build/test command (e.g. `:module:test --tests "Package.*"`) that covers these classes.
+3. **VERIFY:** Wait for all 3 writers to finish. Run ONE targeted build/test command that covers ONLY the modified classes (e.g. `:module:test --tests "com.example.ClassATest,com.example.ClassBTest"`). Do NOT run full module tests if possible.
 4. **MEASURE:** Run `coverage-subagent` with `target_classes` set to the comma-separated list of the 3 classes.
 5. **DECIDE:** Record per-class improvement. If target met or stalled, stop. Else continue to next batch.
 """
@@ -36,7 +36,7 @@ Execute the following loop up to 3 times:
 ORCHESTRATOR_RULES = """
 - **ORCHESTRATION:** You manage specialized sub-agents. Delegate deep work to them.
 - **PARALLELISM:** You are authorized and encouraged to run independent sub-agent tasks in parallel (e.g., generating tests for multiple classes simultaneously).
-- **BATCHING:** In Phase 3, wait for all test generation tasks to complete before running the build.
+- **BATCHING:** In Phase 3, wait for all test generation tasks to complete before running the build. **DO NOT** run verification for individual classes immediately after generation. Run ONE consolidated build per batch.
 - **METRICS:** Summarize timings and iterations in your final answer.
 - **STOPPING CRITERIA (STRICT):**
   1. **SUCCESS:** Stop if `final_coverage` >= `target_coverage` (as defined in input). Set termination_reason="target_met".
