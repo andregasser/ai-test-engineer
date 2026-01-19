@@ -53,7 +53,13 @@ def read_coverage_report(project_root: str, target_classes: str = None) -> Cover
     target_classes: Optional comma-separated list of simple or fully qualified class names to filter results (e.g. "UserService, AuthController").
     """
     try:
+        import os
         root = Path(project_root)
+        if not root.is_absolute():
+            root = Path(os.getcwd()) / project_root
+        
+        print(f"Searching for reports in: {root}")
+        
         standards_file = root / "TESTING_STANDARDS.md"
         report_files = []
 
@@ -73,14 +79,19 @@ def read_coverage_report(project_root: str, target_classes: str = None) -> Cover
 
         # 2. Fallback to standard locations if no custom path found or valid
         if not report_files:
-            possible_root = root / "build/reports/jacoco/root/jacocoRootReport.xml"
-            if possible_root.exists():
-                report_files = [possible_root]
+            # Check the path confirmed by `ls -R`
+            std_path = root / "build/reports/jacoco/test/jacocoTestReport.xml"
+            if std_path.exists():
+                report_files = [std_path]
             else:
-                report_files = list(root.glob("**/jacocoTestReport.xml"))
+                possible_root = root / "build/reports/jacoco/root/jacocoRootReport.xml"
+                if possible_root.exists():
+                    report_files = [possible_root]
+                else:
+                    report_files = list(root.glob("**/jacocoTestReport.xml"))
         
         if not report_files:
-            return CoverageSummaryResponse(success=False, error="No reports found. Checked TESTING_STANDARDS.md and standard paths.")
+            return CoverageSummaryResponse(success=False, error=f"No reports found. Checked TESTING_STANDARDS.md and standard paths in {root}")
             
         total_lines_missed = total_lines_covered = total_branches_missed = total_branches_covered = 0
         all_classes_data = []
