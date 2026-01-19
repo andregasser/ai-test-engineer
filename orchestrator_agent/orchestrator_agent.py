@@ -21,7 +21,7 @@ PHASE 1: PREPARATION
 
 PHASE 2: BASELINE MEASUREMENT
 1. **REPORT:** Use `build-subagent` to run the baseline coverage report.
-2. **ANALYZE:** Use `coverage-subagent` to read the baseline metrics.
+2. **ANALYZE:** Use `coverage-subagent` to read the baseline metrics. IMPORTANT: You MUST pass the `target_modules`, `target_packages`, and `target_classes` from your input to `read_coverage_report` to ensure the analysis is scoped correctly.
 
 PHASE 3: BATCH IMPROVEMENT (Max 3 Batches)
 Execute the following loop up to 3 times:

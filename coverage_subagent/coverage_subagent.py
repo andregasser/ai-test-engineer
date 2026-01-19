@@ -58,12 +58,15 @@ def _parse_single_report(report_path: Path):
         return None
 
 @tool
-def read_coverage_report(project_root: str, target_classes: str = None) -> CoverageSummaryResponse:
+def read_coverage_report(project_root: str, target_modules: str = None, target_packages: str = None, target_classes: str = None) -> CoverageSummaryResponse:
     """
-    Parses JaCoCo XML reports. 
-    It checks TESTING_STANDARDS.md for custom report locations first.
-    project_root should be the path to the project directory.
-    target_classes: Optional comma-separated list of simple or fully qualified class names to filter results (e.g. "UserService, AuthController").
+    Parses JaCoCo XML reports with advanced filtering.
+    
+    Args:
+        project_root: Path to the project root or module directory.
+        target_modules: (Optional) Comma-separated list of module paths to include.
+        target_packages: (Optional) Comma-separated list of package prefixes to include (e.g., "com.swisscom.myai.asset").
+        target_classes: (Optional) Comma-separated list of specific classes to include.
     """
     try:
         import os
@@ -80,19 +83,16 @@ def read_coverage_report(project_root: str, target_classes: str = None) -> Cover
         if standards_file.exists():
             try:
                 content = standards_file.read_text()
-                # Simple regex to find path in markdown list or text
-                # Looks for patterns like: "Report Path: path/to/report.xml" or "- Path: path/to/report.xml"
                 match = re.search(r"(?:Report Path|Jacoco Report):\s*([^\s\n]+)", content, re.IGNORECASE)
                 if match:
                     custom_path = root / match.group(1).strip()
                     if custom_path.exists():
                         report_files = [custom_path]
             except Exception:
-                pass # Fallback if parsing fails
+                pass 
 
-        # 2. Fallback to standard locations if no custom path found or valid
+        # 2. Fallback to standard locations
         if not report_files:
-            # Check the path confirmed by `ls -R`
             std_path = root / "build/reports/jacoco/test/jacocoTestReport.xml"
             if std_path.exists():
                 report_files = [std_path]
@@ -104,7 +104,7 @@ def read_coverage_report(project_root: str, target_classes: str = None) -> Cover
                     report_files = list(root.glob("**/jacocoTestReport.xml"))
         
         if not report_files:
-            return CoverageSummaryResponse(success=False, error=f"No reports found. Checked TESTING_STANDARDS.md and standard paths in {root}")
+            return CoverageSummaryResponse(success=False, error=f"No reports found in {root}")
             
         total_lines_missed = total_lines_covered = total_branches_missed = total_branches_covered = 0
         all_classes_data = []
@@ -117,21 +117,46 @@ def read_coverage_report(project_root: str, target_classes: str = None) -> Cover
                 all_classes_data.extend(res["class_data"])
         
         # Filtering Logic
+        exclude_patterns = [r"\.generated\.", r"\.dto\.", r"\.model\.", r"\.exception\."]
+        
+        targets_m = [t.strip() for t in target_modules.split(",") if t.strip()] if target_modules else []
+        targets_p = [t.strip() for t in target_packages.split(",") if t.strip()] if target_packages else []
+        targets_c = [t.strip() for t in target_classes.split(",") if t.strip()] if target_classes else []
+
         filtered_classes = []
-        if target_classes:
-            targets = [t.strip() for t in target_classes.split(",") if t.strip()]
-            for c_name, cov in all_classes_data:
-                # Check if c_name matches ANY target
-                is_match = False
-                for t in targets:
-                    if c_name == t or c_name.endswith("." + t):
-                        is_match = True
-                        break
-                if is_match:
-                    filtered_classes.append((c_name, cov))
-        else:
-            # Default behavior: worst 20
-            filtered_classes = sorted(all_classes_data, key=lambda x: x[1])[:20]
+        for c_name, cov in all_classes_data:
+            # 1. Exclusions (skip generated code, etc.)
+            # NOTE: If user explicitly requested a class that looks generated, we might want to allow it.
+            # But generally, we skip.
+            if any(re.search(p, c_name, re.IGNORECASE) for p in exclude_patterns):
+                continue
+
+            # 2. Scope Matching
+            # Logic: If ANY filter is provided, the class must match AT LEAST ONE of the provided scopes.
+            # If NO filters are provided, we show everything (minus exclusions).
+            
+            is_included = True # Default to include if no filters
+            
+            if targets_p or targets_c:
+                is_included = False # Filters exist, so default is now exclude
+                
+                # Check Package Match
+                if targets_p and any(c_name.startswith(p) for p in targets_p):
+                    is_included = True
+                
+                # Check Class Match (override)
+                if targets_c:
+                    for t in targets_c:
+                        if c_name == t or c_name.endswith("." + t):
+                            is_included = True
+                            break
+            
+            if is_included:
+                filtered_classes.append((c_name, cov))
+
+        # Sort: worst coverage first
+        filtered_classes.sort(key=lambda x: x[1])
+        top_worst = filtered_classes[:20]
 
         overall_line = total_lines_covered / (total_lines_missed + total_lines_covered) if (total_lines_missed + total_lines_covered) > 0 else 0.0
         overall_branch = total_branches_covered / (total_branches_missed + total_branches_covered) if (total_branches_missed + total_branches_covered) > 0 else 0.0
@@ -140,7 +165,7 @@ def read_coverage_report(project_root: str, target_classes: str = None) -> Cover
             success=True, 
             line_coverage=overall_line, 
             branch_coverage=overall_branch, 
-            worst_classes=[c for c, _ in filtered_classes]
+            worst_classes=[c for c, _ in top_worst]
         )
     except Exception as e:
         return CoverageSummaryResponse(success=False, error=str(e))
