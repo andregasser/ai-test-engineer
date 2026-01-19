@@ -35,7 +35,8 @@ Execute the following loop up to 3 times:
 
 ORCHESTRATOR_RULES = """
 - **ORCHESTRATION:** You manage specialized sub-agents. Delegate deep work to them.
-- **PARALLELISM:** You are authorized and encouraged to run independent sub-agent tasks in parallel (e.g., generating tests for multiple classes simultaneously).
+- **PARALLELISM:** You are authorized and encouraged to run independent sub-agent tasks in parallel.
+  - **MANDATORY:** Whenever generating tests for multiple independent classes, you **MUST** output multiple `test-writer-subagent` tool calls in the SAME response turn. Do not sequentialize them.
 - **BATCHING:** In Phase 3, wait for all test generation tasks to complete before running the build. **DO NOT** run verification for individual classes immediately after generation. Run ONE consolidated build per batch.
 - **METRICS:** Summarize timings and iterations in your final answer.
 - **STOPPING CRITERIA (STRICT):**
