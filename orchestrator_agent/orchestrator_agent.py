@@ -32,12 +32,20 @@ Execute the following loop up to 3 times:
 5. **DECIDE:** Record per-class improvement. If target met or stalled, stop. Else continue to next batch.
 """
 
+from langchain_core.tools import tool
+from shared_utils.schema_utils import AgentReport
+
+# ... imports ...
+
 ORCHESTRATOR_RULES = """
 - **ORCHESTRATION:** You manage specialized sub-agents. Delegate deep work to them.
 - **PARALLELISM:** You are authorized and encouraged to run independent sub-agent tasks in parallel.
   - **MANDATORY:** Whenever generating tests for multiple independent classes, you **MUST** output multiple `test-writer-subagent` tool calls in the SAME response turn. Do not sequentialize them.
 - **BATCHING:** In Phase 3, wait for all test generation tasks to complete before running the build. **DO NOT** run verification for individual classes immediately after generation. Run ONE consolidated build per batch.
 - **METRICS:** Summarize timings and iterations in your final answer.
+- **RESILIENCE & ERROR HANDLING:**
+  - **BUILD FAILURES:** If `build-subagent` returns `status="failure"`, you MUST retry exactly ONCE with the `--info` flag to gather more details. If it fails a second time, consider it a hard failure for that batch.
+  - **GENERATION FAILURES:** If `test-writer-subagent` fails for a specific class (returns `status="failure"`), do NOT retry. Mark that class as failed in your internal tracking, add it to `classes_failed`, and proceed immediately with the remaining candidates. Do not let one failure stall the entire batch.
 - **STOPPING CRITERIA (STRICT):**
   1. **SUCCESS:** Stop if `final_coverage` >= `target_coverage` (as defined in input). Set termination_reason="target_met".
   2. **STALLED:** Stop if:
@@ -46,21 +54,16 @@ ORCHESTRATOR_RULES = """
      - Set termination_reason="stalled_no_progress".
   3. **LIMIT:** Never perform more than 3 improvement batches. If you complete Batch 3 and target is not met, stop immediately. Set termination_reason="max_batches_reached".
 
-Final answer MUST be a raw JSON string (no markdown formatting) matching the following schema:
-{
-    "initial_coverage": float,
-    "final_coverage": float,
-    "coverage_delta": float,
-    "classes_targeted": [str],
-    "classes_improved": [str],
-    "classes_failed": [str],
-    "total_iterations": int,
-    "duration_seconds": float,
-    "termination_reason": str
-}
+**OUTPUT FORMAT:**
+To finish your task, you **MUST** call the `submit_agent_report` tool. This is the only way to return your result. Refer to the tool's definition for the required arguments.
 """
 
 ORCHESTRATOR_SYSTEM_PROMPT = get_inherited_prompt(ORCHESTRATOR_ROLE, ORCHESTRATOR_PROTOCOL, ORCHESTRATOR_RULES)
+
+@tool(args_schema=AgentReport)
+def submit_agent_report(**kwargs):
+    """Finalizes the Orchestrator's work and returns the structured report."""
+    return kwargs
 
 def handle_orchestrator_error(input_state: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -104,7 +107,7 @@ def get_orchestrator_agent(project_root: str):
     
     agent = create_deep_agent(
         model=GEMINI_FLASH_3_PREVIEW_MODEL,
-        tools=[], 
+        tools=[submit_agent_report], 
         system_prompt=ORCHESTRATOR_SYSTEM_PROMPT,
         subagents=subagents,
         middleware=middleware,
