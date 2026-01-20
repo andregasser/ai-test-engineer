@@ -9,6 +9,7 @@ _resilient_retry = retry(
     retry=retry_if_exception_type((
         google_errors.ServerError,
         google_errors.APIError,
+        google_errors.ClientError, # Catch 4xx errors like 429
         httpx.TimeoutException,
         httpx.ConnectError,
         httpx.ReadTimeout,
@@ -16,8 +17,8 @@ _resilient_retry = retry(
         httpx.NetworkError,
         httpx.RemoteProtocolError,
     )),
-    wait=wait_exponential_jitter(initial=1, max=60, jitter=1),
-    stop=stop_after_attempt(10),
+    wait=wait_exponential_jitter(initial=2, max=120, jitter=1),
+    stop=stop_after_attempt(15),
     reraise=True
 )
 
