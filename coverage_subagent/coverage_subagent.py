@@ -25,8 +25,8 @@ COVERAGE_SYSTEM_PROMPT = get_inherited_prompt(COVERAGE_ROLE, COVERAGE_PROTOCOL, 
 
 def _parse_and_filter_report(report_path: Path, exclude_patterns: list, targets_p: list, targets_c: list):
     """
-    Parses a single JaCoCo report using lxml.iterparse for high performance and low memory usage.
-    Applies filters on-the-fly.
+    Parses a single JaCoCo report using lxml.iterparse optimized for speed.
+    Only iterates over 'class' elements to minimize Python loop overhead.
     """
     lines_missed = 0
     lines_covered = 0
@@ -35,91 +35,70 @@ def _parse_and_filter_report(report_path: Path, exclude_patterns: list, targets_
     class_data = []
 
     try:
-        # Use iterparse to process the file incrementally
-        context = etree.iterparse(str(report_path), events=("start", "end"))
+        # Optimization: Only trigger on 'class' tags. This skips 'package', 'method', 'sourcefile', etc.
+        # until the class is fully parsed.
+        context = etree.iterparse(str(report_path), events=("end",), tag="class")
         
-        current_package = ""
-        skip_current_package = False
-
         for event, elem in context:
-            tag_name = elem.tag
+            class_name = elem.get("name", "").replace("/", ".")
             
-            if event == "start":
-                if tag_name == "package":
-                    current_package = elem.get("name", "").replace("/", ".")
-                    skip_current_package = False
-                    
-                    # Optimization: Skip entire package if it doesn't match target_packages
-                    if targets_p:
-                        # Check if this package starts with any target prefix
-                        if not any(current_package.startswith(p) for p in targets_p):
-                            skip_current_package = True
-                    
-                    # Optimization: Skip excluded packages immediately
-                    if not skip_current_package and any(re.search(p, current_package, re.IGNORECASE) for p in exclude_patterns):
-                        skip_current_package = True
+            # 1. Fast Exclusions (Regex)
+            if any(re.search(p, class_name, re.IGNORECASE) for p in exclude_patterns):
+                elem.clear()
+                while elem.getprevious() is not None:
+                    del elem.getparent()[0]
+                continue
 
-            elif event == "end":
-                if tag_name == "counter":
-                    # Global counters (usually at the end of report or bundle)
-                    # We only care about global counters if we are processing the root element or a relevant scope.
-                    # However, extracting global metrics from filtered classes is safer.
-                    pass
-
-                elif tag_name == "class":
-                    if skip_current_package:
-                        elem.clear()
-                        continue
-
-                    class_name = elem.get("name", "").replace("/", ".")
-                    
-                    # Class Level Filtering
-                    # 1. Exclusions
-                    if any(re.search(p, class_name, re.IGNORECASE) for p in exclude_patterns):
-                        elem.clear()
-                        continue
-
-                    # 2. Scope Matching (Class specific)
-                    if targets_c:
-                        is_match = False
-                        for t in targets_c:
-                            if class_name == t or class_name.endswith("." + t):
-                                is_match = True
-                                break
-                        if not is_match:
-                            elem.clear()
-                            continue
-                    
-                    # If we reached here, the class is included. Extract its counters.
-                    c_l_m = 0
-                    c_l_c = 0
-                    
-                    for child in elem:
-                        if child.tag == "counter":
-                            ctype = child.get("type")
-                            missed = int(child.get("missed"))
-                            covered = int(child.get("covered"))
-                            
-                            if ctype == "LINE":
-                                c_l_m = missed
-                                c_l_c = covered
-                                lines_missed += missed
-                                lines_covered += covered
-                            elif ctype == "BRANCH":
-                                branches_missed += missed
-                                branches_covered += covered
-                    
-                    # Store class data
-                    if (c_l_m + c_l_c) > 0:
-                        class_data.append((class_name, c_l_c / (c_l_m + c_l_c)))
-                    
-                    # Clear element to free memory
+            # 2. Scope Matching
+            # Check Package Matches (targets_p)
+            if targets_p:
+                if not any(class_name.startswith(p) for p in targets_p):
                     elem.clear()
-                    
-                elif tag_name == "package":
-                    current_package = ""
-                    skip_current_package = False
+                    while elem.getprevious() is not None:
+                        del elem.getparent()[0]
+                    continue
+            
+            # Check Class Matches (targets_c)
+            if targets_c:
+                is_match = False
+                for t in targets_c:
+                    if class_name == t or class_name.endswith("." + t):
+                        is_match = True
+                        break
+                if not is_match:
                     elem.clear()
+                    while elem.getprevious() is not None:
+                        del elem.getparent()[0]
+                    continue
+            
+            # If included, process counters
+            c_l_m = 0
+            c_l_c = 0
+            
+            # Direct iteration over children is fast in lxml
+            for child in elem:
+                if child.tag == "counter":
+                    ctype = child.get("type")
+                    missed = int(child.get("missed"))
+                    covered = int(child.get("covered"))
+                    
+                    if ctype == "LINE":
+                        c_l_m = missed
+                        c_l_c = covered
+                        lines_missed += missed
+                        lines_covered += covered
+                    elif ctype == "BRANCH":
+                        branches_missed += missed
+                        branches_covered += covered
+            
+            if (c_l_m + c_l_c) > 0:
+                class_data.append((class_name, c_l_c / (c_l_m + c_l_c)))
+            
+            # Aggressive memory cleanup
+            elem.clear()
+            # Also clean up previous siblings to keep the tree small
+            while elem.getprevious() is not None:
+                del elem.getparent()[0]
 
         return {
             "lines_missed": lines_missed, 
