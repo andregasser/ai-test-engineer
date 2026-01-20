@@ -2,12 +2,15 @@ from typing import Dict, Any
 import json
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
+from langchain_core.tools import tool
+from shared_utils.schema_utils import AgentReport
 
 from deepagents import create_deep_agent
 from git_subagent.git_subagent import get_git_subagent
 from test_writer_subagent.test_writer_subagent import get_test_writer_subagent
 from coverage_subagent.coverage_subagent import get_coverage_subagent
 from build_subagent.build_subagent import get_build_subagent
+from reviewer_subagent.reviewer_subagent import get_reviewer_subagent
 
 from shared_utils.prompt_utils import get_inherited_prompt
 from shared_utils.model_utils import GEMINI_FLASH_3_PREVIEW_MODEL
@@ -26,16 +29,18 @@ PHASE 2: BASELINE MEASUREMENT
 PHASE 3: BATCH IMPROVEMENT (Max 3 Batches)
 Execute the following loop up to 3 times:
 1. **CANDIDATES:** Use coverage data to select the top 3 worst classes (prioritize services/acm-service).
-2. **GENERATE:** Call `test-writer-subagent` for all 3 candidates SIMULTANEOUSLY using their EXACT Fully Qualified Class Names (FQN). You MUST output 3 separate tool calls in the same response turn.
-3. **VERIFY:** Wait for all 3 writers to finish. Run ONE targeted build/test command that covers ONLY the modified classes (e.g. `:module:test --tests "com.example.ClassATest,com.example.ClassBTest"`). Do NOT run full module tests if possible.
-4. **MEASURE:** Run `coverage-subagent` with `target_classes` set to the comma-separated list of the 3 classes.
-5. **DECIDE:** Record per-class improvement. If target met or stalled, stop. Else continue to next batch.
+2. **GENERATE & REVIEW LOOP:**
+   For each candidate (can be parallelized):
+   a. **GENERATE:** Call `test-writer-subagent` (using FQN).
+   b. **REVIEW:** Call `reviewer-subagent` passing the path of the generated test file.
+   c. **DECIDE:**
+      - If `status="approved"`: Proceed.
+      - If `status="rejected"`: Call `test-writer-subagent` again with the `constructive_feedback`.
+      - **LIMIT:** Retry step (a) at most 2 times. If still rejected, mark as failed and skip.
+3. **VERIFY:** Wait for all approved tests. Run ONE targeted build/test command that covers ONLY the modified classes.
+4. **MEASURE:** Run `coverage-subagent` with `target_classes`.
+5. **DECIDE:** Record improvement. Stop if target met.
 """
-
-from langchain_core.tools import tool
-from shared_utils.schema_utils import AgentReport
-
-# ... imports ...
 
 ORCHESTRATOR_RULES = """
 - **ORCHESTRATION:** You manage specialized sub-agents. Delegate deep work to them.
@@ -46,6 +51,7 @@ ORCHESTRATOR_RULES = """
 - **RESILIENCE & ERROR HANDLING:**
   - **BUILD FAILURES:** If `build-subagent` returns `status="failure"`, you MUST retry exactly ONCE with the `--info` flag to gather more details. If it fails a second time, consider it a hard failure for that batch.
   - **GENERATION FAILURES:** If `test-writer-subagent` fails for a specific class (returns `status="failure"`), do NOT retry. Mark that class as failed in your internal tracking, add it to `classes_failed`, and proceed immediately with the remaining candidates. Do not let one failure stall the entire batch.
+  - **REVIEW LOOPS:** Strictly limit the "Fix-Review" loop to 2 iterations per class to avoid infinite loops. If a test is rejected 3 times, discard it (delete the file using `run_shell_command`) and mark the class as failed.
 - **STOPPING CRITERIA (STRICT):**
   1. **SUCCESS:** Stop if `final_coverage` >= `target_coverage` (as defined in input). Set termination_reason="target_met".
   2. **STALLED:** Stop if:
@@ -101,6 +107,7 @@ def get_orchestrator_agent(project_root: str):
     subagents = [
         get_git_subagent(),
         get_test_writer_subagent(project_root),
+        get_reviewer_subagent(project_root),
         get_build_subagent(),
         get_coverage_subagent()
     ]

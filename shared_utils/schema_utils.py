@@ -61,3 +61,9 @@ class CoverageAgentOutput(BaseModel):
     overall_coverage: float = Field(..., description="Overall line coverage (0.0 to 1.0) for the scope.")
     by_class: Dict[str, float] = Field(default_factory=dict, description="Mapping of FQN to coverage float (0.0 to 1.0).")
     hotspots: List[str] = Field(default_factory=list, description="List of methods with 0% coverage to target.")
+
+class ReviewerAgentOutput(BaseModel):
+    """Structured output for the Reviewer Sub-Agent."""
+    status: str = Field(..., description="'approved' or 'rejected'")
+    critical_violations: List[str] = Field(default_factory=list, description="List of specific standard violations found.")
+    constructive_feedback: str = Field(..., description="Actionable instructions for the Test Writer to fix the issues.")

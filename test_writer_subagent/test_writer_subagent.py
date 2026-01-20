@@ -6,11 +6,11 @@ import json
 
 TEST_WRITER_ROLE = "You are a Java/JUnit test generation agent. Your goal is to generate robust JUnit 5 tests to improve coverage."
 
-# Updated Protocol: Removed the step to call the tool, as standards are now injected.
+# Updated Protocol: Focus strictly on generation. Quality review is now external.
 TEST_WRITER_PROTOCOL = """
 1. **CONTEXT:** Use `inspect_java_class` to get the production code and existing tests.
-2. **ANALYSIS:** Review the code against the **PROJECT TESTING STANDARDS** provided below.
-3. **ONE-SHOT GENERATION:** Generate the ENTIRE test class.
+2. **ANALYSIS:** Analyze the logic and required test cases based on the **PROJECT TESTING STANDARDS**.
+3. **ONE-SHOT GENERATION:** Generate the ENTIRE test class in a single response. Do not review your own work; the Reviewer Agent will handle that.
 """
 
 TEST_WRITER_RULES = """
