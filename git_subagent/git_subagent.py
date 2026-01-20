@@ -21,13 +21,19 @@ GIT_RULES = """
 
 GIT_SYSTEM_PROMPT = get_inherited_prompt(GIT_ROLE, GIT_PROTOCOL, GIT_RULES)
 
+from shared_utils.logger import get_logger
+
+logger = get_logger("git-subagent")
+
 @tool(args_schema=GitAgentOutput)
 def submit_git_output(**kwargs):
     """Finalizes the Git agent's work and returns the structured result."""
+    logger.info(f"✅ Git operation finished with status: {kwargs.get('status')}")
     return kwargs
 
 def get_git_subagent():
     """Factory function to create the Git Subagent."""
+    logger.info("🛠️  Initializing Git Subagent...")
     return {
         "name": "git-subagent",
         "description": "Handles repository management: cloning, checking out branches, committing, and pushing.",

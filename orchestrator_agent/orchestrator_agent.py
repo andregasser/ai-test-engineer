@@ -69,6 +69,7 @@ ORCHESTRATOR_SYSTEM_PROMPT = get_inherited_prompt(ORCHESTRATOR_ROLE, ORCHESTRATO
 @tool(args_schema=AgentReport)
 def submit_agent_report(**kwargs):
     """Finalizes the Orchestrator's work and returns the structured report."""
+    logger.info("🏁 Orchestrator submitting final report.")
     return kwargs
 
 def handle_orchestrator_error(input_state: Dict[str, Any]) -> Dict[str, Any]:
@@ -100,7 +101,12 @@ def handle_orchestrator_error(input_state: Dict[str, Any]) -> Dict[str, Any]:
         "messages": messages + [failure_message]
     }
 
+from shared_utils.logger import get_logger
+
+logger = get_logger("orchestrator")
+
 def get_orchestrator_agent(project_root: str):
+    logger.info(f"🤖 Initializing Orchestrator Agent for project: {project_root}")
     middleware, backend = get_agent_runtime(project_root)
     
     # Dynamically create subagents

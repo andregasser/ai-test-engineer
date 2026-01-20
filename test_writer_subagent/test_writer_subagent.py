@@ -50,18 +50,9 @@ def _read_standards(project_root: str) -> str:
 def inspect_java_class(class_name: str, project_root: str) -> str:
     """
     Efficiently locates and reads a Java class and its corresponding test class.
-    
-    Args:
-        class_name: The simple name (e.g. 'UserService') or fully qualified name (e.g. 'com.example.UserService') of the class.
-        project_root: The root directory of the project.
-        
-    Returns:
-        A formatted string containing:
-        - Class File Path
-        - Class Content
-        - Test File Path (if found)
-        - Test Content (if found)
+    ...
     """
+    logger.info(f"🔍 Inspecting class: {class_name}")
     try:
         root = Path(project_root)
         
@@ -132,9 +123,14 @@ def inspect_java_class(class_name: str, project_root: str) -> str:
     except Exception as e:
         return f"Error inspecting class: {str(e)}"
 
+from shared_utils.logger import get_logger
+
+logger = get_logger("test-writer-subagent")
+
 @tool(args_schema=TestWriterAgentOutput)
 def submit_test_writer_output(**kwargs):
     """Finalizes the Test Writer agent's work and returns the structured result."""
+    logger.info(f"✍️  Test generation finished with status: {kwargs.get('status')}")
     return kwargs
 
 def get_test_writer_subagent(project_root: str):
@@ -142,6 +138,7 @@ def get_test_writer_subagent(project_root: str):
     Factory function to create the Test Writer Subagent.
     Injects the TESTING_STANDARDS.md content directly into the system prompt.
     """
+    logger.info("📝 Initializing Test Writer Subagent...")
     standards_content = _read_standards(project_root)
     
     # Combine inherited prompt with injected standards

@@ -61,13 +61,9 @@ def _parse_single_report(report_path: Path):
 def read_coverage_report(project_root: str, target_modules: str = None, target_packages: str = None, target_classes: str = None) -> CoverageSummaryResponse:
     """
     Parses JaCoCo XML reports with advanced filtering.
-    
-    Args:
-        project_root: Path to the project root or module directory.
-        target_modules: (Optional) Comma-separated list of module paths to include.
-        target_packages: (Optional) Comma-separated list of package prefixes to include (e.g., "com.swisscom.myai.asset").
-        target_classes: (Optional) Comma-separated list of specific classes to include.
+    ...
     """
+    logger.info(f"📊 Reading coverage report. Modules: {target_modules}, Packages: {target_packages}, Classes: {target_classes}")
     try:
         import os
         root = Path(project_root)
@@ -170,13 +166,19 @@ def read_coverage_report(project_root: str, target_modules: str = None, target_p
     except Exception as e:
         return CoverageSummaryResponse(success=False, error=str(e))
 
+from shared_utils.logger import get_logger
+
+logger = get_logger("coverage-subagent")
+
 @tool(args_schema=CoverageAgentOutput)
 def submit_coverage_output(**kwargs):
     """Finalizes the Coverage agent's work and returns the structured result."""
+    logger.info(f"📊 Coverage analysis finished. Overall: {kwargs.get('overall_coverage')}")
     return kwargs
 
 def get_coverage_subagent():
     """Factory function to create the Coverage Subagent."""
+    logger.info("📈 Initializing Coverage Subagent...")
     return {
         "name": "coverage-subagent",
         "description": "Parses and analyzes JaCoCo coverage reports.",

@@ -2,7 +2,6 @@ from pathlib import Path
 from langchain_core.tools import tool
 from shared_utils.prompt_utils import get_inherited_prompt
 from shared_utils.schema_utils import ReviewerAgentOutput
-import json
 
 REVIEWER_ROLE = "You are a strict QA Compliance Officer for a Java project. You DO NOT write code. You only audit it."
 
@@ -43,13 +42,19 @@ def _read_standards(project_root: str) -> str:
     except Exception as e:
         return f"Error reading standards: {str(e)}"
 
+from shared_utils.logger import get_logger
+
+logger = get_logger("reviewer-subagent")
+
 @tool(args_schema=ReviewerAgentOutput)
 def submit_review_result(**kwargs):
     """Finalizes the Reviewer's work and returns the structured result."""
+    logger.info(f"🧐 Review finished with status: {kwargs.get('status')}")
     return kwargs
 
 def get_reviewer_subagent(project_root: str):
     """Factory function to create the Reviewer Subagent with injected standards."""
+    logger.info("⚖️  Initializing Reviewer Subagent...")
     standards_content = _read_standards(project_root)
     
     base_prompt = get_inherited_prompt(REVIEWER_ROLE, REVIEWER_PROTOCOL, REVIEWER_RULES)

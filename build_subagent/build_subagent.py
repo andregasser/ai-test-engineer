@@ -20,13 +20,19 @@ BUILD_RULES = """
 
 BUILD_SYSTEM_PROMPT = get_inherited_prompt(BUILD_ROLE, BUILD_PROTOCOL, BUILD_RULES)
 
+from shared_utils.logger import get_logger
+
+logger = get_logger("build-subagent")
+
 @tool(args_schema=BuildAgentOutput)
 def submit_build_output(**kwargs):
     """Finalizes the Build agent's work and returns the structured result."""
+    logger.info(f"🏗️  Build finished with status: {kwargs.get('status')}")
     return kwargs
 
 def get_build_subagent():
     """Factory function to create the Build Subagent."""
+    logger.info("🔨 Initializing Build Subagent...")
     return {
         "name": "build-subagent",
         "description": "Runs Gradle builds and tests to verify code changes.",
