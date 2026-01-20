@@ -49,7 +49,11 @@ logger = get_logger("reviewer-subagent")
 @tool(args_schema=ReviewerAgentOutput)
 def submit_review_result(**kwargs):
     """Finalizes the Reviewer's work and returns the structured result."""
-    logger.info(f"🧐 Review finished with status: {kwargs.get('status')}")
+    status = kwargs.get('status')
+    violations = kwargs.get('critical_violations', [])
+    logger.info(f"🧐 Review finished. Status: {status}. Violations: {len(violations)}")
+    if violations:
+        logger.info(f"    ⚠️  Violations: {violations}")
     return kwargs
 
 def get_reviewer_subagent(project_root: str):

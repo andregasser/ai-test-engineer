@@ -27,7 +27,12 @@ logger = get_logger("build-subagent")
 @tool(args_schema=BuildAgentOutput)
 def submit_build_output(**kwargs):
     """Finalizes the Build agent's work and returns the structured result."""
-    logger.info(f"🏗️  Build finished with status: {kwargs.get('status')}")
+    status = kwargs.get('status')
+    commands = kwargs.get('commands_run', [])
+    failed = kwargs.get('failed_tests', [])
+    logger.info(f"🏗️  Build finished. Status: {status}. Commands: {commands}")
+    if failed:
+        logger.info(f"    ❌ Failed Tests: {failed}")
     return kwargs
 
 def get_build_subagent():

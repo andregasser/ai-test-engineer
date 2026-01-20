@@ -130,7 +130,9 @@ logger = get_logger("test-writer-subagent")
 @tool(args_schema=TestWriterAgentOutput)
 def submit_test_writer_output(**kwargs):
     """Finalizes the Test Writer agent's work and returns the structured result."""
-    logger.info(f"✍️  Test generation finished with status: {kwargs.get('status')}")
+    files = kwargs.get('files_created', [])
+    status = kwargs.get('status')
+    logger.info(f"✍️  Test generation finished. Status: {status}. Files: {files}")
     return kwargs
 
 def get_test_writer_subagent(project_root: str):

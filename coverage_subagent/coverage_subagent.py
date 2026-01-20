@@ -70,7 +70,7 @@ def read_coverage_report(project_root: str, target_modules: str = None, target_p
         if not root.is_absolute():
             root = Path(os.getcwd()) / project_root
         
-        print(f"Searching for reports in: {root}")
+        logger.info(f"Searching for reports in: {root}")
         
         standards_file = root / "TESTING_STANDARDS.md"
         report_files = []
@@ -173,7 +173,9 @@ logger = get_logger("coverage-subagent")
 @tool(args_schema=CoverageAgentOutput)
 def submit_coverage_output(**kwargs):
     """Finalizes the Coverage agent's work and returns the structured result."""
-    logger.info(f"📊 Coverage analysis finished. Overall: {kwargs.get('overall_coverage')}")
+    overall = kwargs.get('overall_coverage')
+    hotspots = kwargs.get('hotspots', [])
+    logger.info(f"📊 Coverage analysis finished. Overall: {overall:.2%}. Hotspots found: {len(hotspots)}")
     return kwargs
 
 def get_coverage_subagent():
