@@ -1,11 +1,13 @@
-from concurrent.futures import ProcessPoolExecutor
-import xml.etree.ElementTree as ET
 from pathlib import Path
 import re
 from langchain_core.tools import tool
 from shared_utils.prompt_utils import get_inherited_prompt
 from shared_utils.schema_utils import CoverageSummaryResponse
 from shared_utils.schema_utils import CoverageAgentOutput
+from shared_utils.logger import get_logger
+from lxml import etree
+
+logger = get_logger("coverage-subagent")
 
 COVERAGE_ROLE = "You are a coverage analysis agent for a Java/Gradle project."
 
@@ -21,56 +23,128 @@ COVERAGE_RULES = """
 
 COVERAGE_SYSTEM_PROMPT = get_inherited_prompt(COVERAGE_ROLE, COVERAGE_PROTOCOL, COVERAGE_RULES)
 
-def _parse_single_report(report_path: Path):
-    """Function to parse a single JaCoCo report."""
+def _parse_and_filter_report(report_path: Path, exclude_patterns: list, targets_p: list, targets_c: list):
+    """
+    Parses a single JaCoCo report using lxml.iterparse for high performance and low memory usage.
+    Applies filters on-the-fly.
+    """
+    lines_missed = 0
+    lines_covered = 0
+    branches_missed = 0
+    branches_covered = 0
+    class_data = []
+
     try:
-        tree = ET.parse(report_path)
-        root_xml = tree.getroot()
-        lines_missed = 0
-        lines_covered = 0
-        branches_missed = 0
-        branches_covered = 0
-        class_data = []
-        for c in root_xml:
-            tag_name = c.tag.split("}")[-1]
-            if tag_name == "counter":
-                ctype = c.attrib.get("type")
-                if ctype == "LINE":
-                    lines_missed += int(c.attrib["missed"])
-                    lines_covered += int(c.attrib["covered"])
-                elif ctype == "BRANCH":
-                    branches_missed += int(c.attrib["missed"])
-                    branches_covered += int(c.attrib["covered"])
-        for element in root_xml.iter():
-            tag_name = element.tag.split("}")[-1]
-            if tag_name == "class":
-                class_name = element.attrib.get("name", "")
-                for child in element:
-                    if child.tag.split("}")[-1] == "counter":
-                        if child.attrib.get("type") == "LINE":
-                            l_m = int(child.attrib["missed"])
-                            l_c = int(child.attrib["covered"])
-                            if (l_m + l_c) > 0:
-                                class_data.append((class_name.replace("/", "."), l_c / (l_m + l_c)))
-                            break
-        return {"lines_missed": lines_missed, "lines_covered": lines_covered, "branches_missed": branches_missed, "branches_covered": branches_covered, "class_data": class_data}
-    except Exception:
+        # Use iterparse to process the file incrementally
+        context = etree.iterparse(str(report_path), events=("start", "end"))
+        
+        current_package = ""
+        skip_current_package = False
+
+        for event, elem in context:
+            tag_name = elem.tag
+            
+            if event == "start":
+                if tag_name == "package":
+                    current_package = elem.get("name", "").replace("/", ".")
+                    skip_current_package = False
+                    
+                    # Optimization: Skip entire package if it doesn't match target_packages
+                    if targets_p:
+                        # Check if this package starts with any target prefix
+                        if not any(current_package.startswith(p) for p in targets_p):
+                            skip_current_package = True
+                    
+                    # Optimization: Skip excluded packages immediately
+                    if not skip_current_package and any(re.search(p, current_package, re.IGNORECASE) for p in exclude_patterns):
+                        skip_current_package = True
+
+            elif event == "end":
+                if tag_name == "counter":
+                    # Global counters (usually at the end of report or bundle)
+                    # We only care about global counters if we are processing the root element or a relevant scope.
+                    # However, extracting global metrics from filtered classes is safer.
+                    pass
+
+                elif tag_name == "class":
+                    if skip_current_package:
+                        elem.clear()
+                        continue
+
+                    class_name = elem.get("name", "").replace("/", ".")
+                    
+                    # Class Level Filtering
+                    # 1. Exclusions
+                    if any(re.search(p, class_name, re.IGNORECASE) for p in exclude_patterns):
+                        elem.clear()
+                        continue
+
+                    # 2. Scope Matching (Class specific)
+                    if targets_c:
+                        is_match = False
+                        for t in targets_c:
+                            if class_name == t or class_name.endswith("." + t):
+                                is_match = True
+                                break
+                        if not is_match:
+                            elem.clear()
+                            continue
+                    
+                    # If we reached here, the class is included. Extract its counters.
+                    c_l_m = 0
+                    c_l_c = 0
+                    
+                    for child in elem:
+                        if child.tag == "counter":
+                            ctype = child.get("type")
+                            missed = int(child.get("missed"))
+                            covered = int(child.get("covered"))
+                            
+                            if ctype == "LINE":
+                                c_l_m = missed
+                                c_l_c = covered
+                                lines_missed += missed
+                                lines_covered += covered
+                            elif ctype == "BRANCH":
+                                branches_missed += missed
+                                branches_covered += covered
+                    
+                    # Store class data
+                    if (c_l_m + c_l_c) > 0:
+                        class_data.append((class_name, c_l_c / (c_l_m + c_l_c)))
+                    
+                    # Clear element to free memory
+                    elem.clear()
+                    
+                elif tag_name == "package":
+                    current_package = ""
+                    skip_current_package = False
+                    elem.clear()
+
+        return {
+            "lines_missed": lines_missed, 
+            "lines_covered": lines_covered, 
+            "branches_missed": branches_missed, 
+            "branches_covered": branches_covered, 
+            "class_data": class_data
+        }
+        
+    except Exception as e:
+        logger.error(f"Error parsing {report_path}: {e}")
         return None
 
 @tool
 def read_coverage_report(project_root: str, target_modules: str = None, target_packages: str = None, target_classes: str = None) -> CoverageSummaryResponse:
     """
-    Parses JaCoCo XML reports with advanced filtering.
-    ...
+    Parses JaCoCo XML reports with advanced filtering using fast streaming parsing.
     """
-    logger.info(f"📊 Reading coverage report. Modules: {target_modules}, Packages: {target_packages}, Classes: {target_classes}")
     try:
         import os
         root = Path(project_root)
         if not root.is_absolute():
             root = Path(os.getcwd()) / project_root
         
-        logger.info(f"Searching for reports in: {root}")
+        logger.info(f"📊 Reading coverage report. Modules: {target_modules}, Packages: {target_packages}, Classes: {target_classes}")
         
         standards_file = root / "TESTING_STANDARDS.md"
         report_files = []
@@ -87,7 +161,20 @@ def read_coverage_report(project_root: str, target_modules: str = None, target_p
             except Exception:
                 pass 
 
-        # 2. Fallback to standard locations
+        # 2. Logic: If target_modules is provided, prefer reports INSIDE those modules
+        targets_m = [t.strip() for t in target_modules.split(",") if t.strip()] if target_modules else []
+        
+        if not report_files and targets_m:
+            for module in targets_m:
+                candidates = [
+                    root / module / "build/reports/jacoco/test/jacocoTestReport.xml",
+                ]
+                for cand in candidates:
+                    if cand.exists():
+                        report_files.append(cand)
+                        break
+        
+        # 3. Fallback to standard locations (root aggregate or search)
         if not report_files:
             std_path = root / "build/reports/jacoco/test/jacocoTestReport.xml"
             if std_path.exists():
@@ -102,57 +189,30 @@ def read_coverage_report(project_root: str, target_modules: str = None, target_p
         if not report_files:
             return CoverageSummaryResponse(success=False, error=f"No reports found in {root}")
             
-        total_lines_missed = total_lines_covered = total_branches_missed = total_branches_covered = 0
-        all_classes_data = []
-        with ProcessPoolExecutor() as executor:
-            results = list(executor.map(_parse_single_report, report_files))
-        for res in results:
-            if res:
-                total_lines_missed += res["lines_missed"]; total_lines_covered += res["lines_covered"]
-                total_branches_missed += res["branches_missed"]; total_branches_covered += res["branches_covered"]
-                all_classes_data.extend(res["class_data"])
+        # Parse and Aggregation
+        total_lines_missed = 0
+        total_lines_covered = 0
+        total_branches_missed = 0
+        total_branches_covered = 0
+        all_class_data = []
         
-        # Filtering Logic
         exclude_patterns = [r"\.generated\.", r"\.dto\.", r"\.model\.", r"\.exception\."]
-        
-        targets_m = [t.strip() for t in target_modules.split(",") if t.strip()] if target_modules else []
         targets_p = [t.strip() for t in target_packages.split(",") if t.strip()] if target_packages else []
         targets_c = [t.strip() for t in target_classes.split(",") if t.strip()] if target_classes else []
 
-        filtered_classes = []
-        for c_name, cov in all_classes_data:
-            # 1. Exclusions (skip generated code, etc.)
-            # NOTE: If user explicitly requested a class that looks generated, we might want to allow it.
-            # But generally, we skip.
-            if any(re.search(p, c_name, re.IGNORECASE) for p in exclude_patterns):
-                continue
-
-            # 2. Scope Matching
-            # Logic: If ANY filter is provided, the class must match AT LEAST ONE of the provided scopes.
-            # If NO filters are provided, we show everything (minus exclusions).
-            
-            is_included = True # Default to include if no filters
-            
-            if targets_p or targets_c:
-                is_included = False # Filters exist, so default is now exclude
-                
-                # Check Package Match
-                if targets_p and any(c_name.startswith(p) for p in targets_p):
-                    is_included = True
-                
-                # Check Class Match (override)
-                if targets_c:
-                    for t in targets_c:
-                        if c_name == t or c_name.endswith("." + t):
-                            is_included = True
-                            break
-            
-            if is_included:
-                filtered_classes.append((c_name, cov))
+        # Process sequentially (faster for I/O bound XML parsing than mp overhead usually, especially with iterparse)
+        for report_path in report_files:
+            res = _parse_and_filter_report(report_path, exclude_patterns, targets_p, targets_c)
+            if res:
+                total_lines_missed += res["lines_missed"]
+                total_lines_covered += res["lines_covered"]
+                total_branches_missed += res["branches_missed"]
+                total_branches_covered += res["branches_covered"]
+                all_class_data.extend(res["class_data"])
 
         # Sort: worst coverage first
-        filtered_classes.sort(key=lambda x: x[1])
-        top_worst = filtered_classes[:20]
+        all_class_data.sort(key=lambda x: x[1])
+        top_worst = all_class_data[:20]
 
         overall_line = total_lines_covered / (total_lines_missed + total_lines_covered) if (total_lines_missed + total_lines_covered) > 0 else 0.0
         overall_branch = total_branches_covered / (total_branches_missed + total_branches_covered) if (total_branches_missed + total_branches_covered) > 0 else 0.0
