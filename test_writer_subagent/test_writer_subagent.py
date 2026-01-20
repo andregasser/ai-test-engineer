@@ -1,8 +1,14 @@
 from pathlib import Path
+import os
+import time
+import subprocess
 from langchain_core.tools import tool
 from shared_utils.prompt_utils import get_inherited_prompt
 from shared_utils.schema_utils import TestWriterAgentOutput
+from shared_utils.logger import get_logger
 import json
+
+logger = get_logger("test-writer-subagent")
 
 TEST_WRITER_ROLE = "You are a Java/JUnit test generation agent. Your goal is to generate robust JUnit 5 tests to improve coverage."
 
@@ -14,7 +20,7 @@ TEST_WRITER_PROTOCOL = """
 """
 
 TEST_WRITER_RULES = """
-- **NO PRODUCTION MODS:** Only write files under src/test/java.
+- **CRITICAL - NO PRODUCTION MODS:** You are STRICTLY FORBIDDEN from creating or modifying ANY file in `src/main/java`. You may ONLY write to `src/test/java`. Violating this rule is a critical failure.
 - **EXISTING TESTS:** If `inspect_java_class` returns an existing test, preserve its useful parts. Do not duplicate test methods.
 - **STANDARDS:** You must strictly follow the PROJECT TESTING STANDARDS section.
 - **STRICT TAGGING:** Every single test method AND the test class itself MUST be annotated with `@Tag("ai-generated")`. This is mandatory.
@@ -24,9 +30,7 @@ To finish your task, you **MUST** call the `submit_test_writer_output` tool. Thi
 """
 
 def _read_standards(project_root: str) -> str:
-    """
-    Finds and reads the 'TESTING_STANDARDS.md' file.
-    """
+    """Finds and reads the 'TESTING_STANDARDS.md' file."""
     try:
         root = Path(project_root)
         std_content = "No TESTING_STANDARDS.md found in project."
@@ -46,50 +50,104 @@ def _read_standards(project_root: str) -> str:
     except Exception as e:
         return f"Error reading standards: {str(e)}"
 
+def _fast_find_file(root: Path, target_name: str) -> Path | None:
+    """
+    Fast file search using ripgrep (rg) if available, falling back to os.walk.
+    """
+    # 1. Try ripgrep (fastest)
+    try:
+        # rg --files --glob '**/target_name' --max-count 1 root
+        # optimization: stop after first match
+        cmd = ["rg", "--files", "--glob", f"**/{target_name}", str(root)]
+        
+        # Log the command for debugging performance
+        logger.debug(f"Running rg command: {' '.join(cmd)}")
+        
+        t_start = time.time()
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        t_end = time.time()
+        
+        if result.returncode == 0 and result.stdout:
+            paths = result.stdout.strip().split('\n')
+            if paths:
+                best_match = paths[0]
+                # If multiple, prefer src/main
+                for p in paths:
+                    if "src/main/java" in p:
+                        best_match = p
+                        break
+                logger.info(f"✅ rg found {target_name} in {t_end-t_start:.2f}s: {best_match}")
+                return Path(best_match)
+        else:
+            logger.warning(f"⚠️ rg found nothing or failed (code {result.returncode}) for {target_name} in {t_end-t_start:.2f}s")
+            
+    except Exception as e:
+        logger.warning(f"ripgrep failed, falling back to os.walk: {e}")
+
+    # 2. Fallback: os.walk (slower)
+    logger.info(f"🐢 Falling back to os.walk for {target_name}...")
+    ignored_dirs = {'build', '.git', '.gradle', 'node_modules', 'target', 'dist', 'out'}
+    
+    for dirpath, dirnames, filenames in os.walk(root):
+        # Prune ignored directories in-place
+        dirnames[:] = [d for d in dirnames if d not in ignored_dirs]
+        
+        for f in filenames:
+            if f == target_name:
+                return Path(dirpath) / f
+    return None
+
 @tool
 def inspect_java_class(class_name: str, project_root: str) -> str:
     """
     Efficiently locates and reads a Java class and its corresponding test class.
-    ...
     """
+    start_time = time.time()
     logger.info(f"🔍 Inspecting class: {class_name}")
+    
     try:
         root = Path(project_root)
         
-        # 1. Determine search pattern
-        if "." in class_name:
-            # Fully qualified - turn com.example.Foo into **/com/example/Foo.java
-            path_part = class_name.replace(".", "/") + ".java"
-            pattern = f"**/{path_part}"
-        else:
-            # Simple name - **/Foo.java
-            pattern = f"**/{class_name}.java"
-            
-        # 2. Find Production Class
-        # Exclude src/test/java to ensure we find the source code, not the test itself if names overlap weirdly
-        candidates = list(root.glob(pattern))
+        # 1. Try Direct Resolution (O(1)) - Fastest
+        # Convert com.example.Foo -> com/example/Foo.java
+        rel_path = class_name.replace(".", "/") + ".java"
         
-        # Filter for src/main/java if multiple found, or just pick the first that isn't in build/
+        # Standard Gradle/Maven layouts
+        candidates = [
+            root / "src/main/java" / rel_path,
+            root / "src/test/java" / rel_path,
+            # Handle multi-module by checking if root has modules? 
+            # If project_root is repo root, we might not know the module dir.
+            # But checking a few common depths is cheap.
+        ]
+        
         source_file = None
         for c in candidates:
-            if "src/main/java" in str(c):
+            if c.exists():
                 source_file = c
+                logger.info(f"✅ Found class via direct path: {c}")
                 break
-        if not source_file and candidates:
-            source_file = candidates[0]
-            
+        
+        t1 = time.time()
+        
+        # 2. If Direct Resolution Failed, Search (O(N))
+        if not source_file:
+            simple_name = class_name.split(".")[-1]
+            target_file_name = f"{simple_name}.java"
+            source_file = _fast_find_file(root, target_file_name)
+        
         if not source_file:
             return f"❌ Could not find Java class '{class_name}' in project."
 
+        t2 = time.time()
         source_content = source_file.read_text(encoding="utf-8")
+        t3 = time.time()
         
         # 3. Find/Predict Test Class
-        # Assumption: Test class is ClassNameTest.java in src/test/java with same package structure
         test_file = None
         test_content = "No existing test file found."
         
-        # Try to deduce test path from source path
-        # src/main/java/.../Foo.java -> src/test/java/.../FooTest.java
+        # Try fast deduction: swap src/main/java -> src/test/java
         src_path_str = str(source_file)
         if "src/main/java" in src_path_str:
             test_path_str = src_path_str.replace("src/main/java", "src/test/java").replace(".java", "Test.java")
@@ -97,19 +155,23 @@ def inspect_java_class(class_name: str, project_root: str) -> str:
             if test_candidate.exists():
                 test_file = test_candidate
         
-        # If deduction failed, try searching
+        # If deduction failed, try fast search for *Test.java
         if not test_file:
-            test_name = source_file.stem + "Test.java"
-            test_candidates = list(root.glob(f"**/{test_name}"))
-            if test_candidates:
-                test_file = test_candidates[0]
+            simple_name = class_name.split(".")[-1]
+            test_name = simple_name + "Test.java"
+            test_file = _fast_find_file(root, test_name)
 
+        t4 = time.time()
         if test_file:
             test_content = test_file.read_text(encoding="utf-8")
         
+        t_end = time.time()
+        
+        logger.info(f"⏱️  Timing: Direct/Search={t2-t1:.2f}s, ReadSrc={t3-t2:.2f}s, FindTest={t4-t3:.2f}s, Total={t_end-start_time:.2f}s")
+        
         # 4. Construct Output
         output = []
-        output.append(f"MODULE: {source_file.parent}") # Rough module indication
+        output.append(f"MODULE: {source_file.parent}")
         output.append(f"TARGET CLASS PATH: {source_file}")
         output.append("-" * 40)
         output.append(source_content)
@@ -122,10 +184,6 @@ def inspect_java_class(class_name: str, project_root: str) -> str:
 
     except Exception as e:
         return f"Error inspecting class: {str(e)}"
-
-from shared_utils.logger import get_logger
-
-logger = get_logger("test-writer-subagent")
 
 @tool(args_schema=TestWriterAgentOutput)
 def submit_test_writer_output(**kwargs):
