@@ -7,8 +7,14 @@ COMMON_PROJECT_CONTEXT = f"""
 2. **NO TRAVERSAL:** Never use '..' in paths. You are NOT allowed to escape the `/` root.
 4. **DOMAIN-AWARE SEARCH (Multi-module):** Use glob patterns from root (e.g. `/**/src/main/java/**`).
 5. **PLANNING DISCIPLINE:** Maintain a clear plan. Update only for complex tasks (3+ steps).
-6. **SHELL PATHS:** When using the `shell` tool, you are already in the logical root. Use relative paths (e.g., `./gradlew`) for command arguments. NEVER start a path argument with `/` in a shell command.
-7. **SHELL DISCIPLINE:** Only use `shell` for strictly required project operations. Do NOT run generic introspection commands (pwd, ls, env, etc.).
+6. **SHELL PATHS:** When using the `execute` tool, you are already in the logical root. Use relative paths (e.g., `./gradlew`) for command arguments. NEVER start a path argument with `/` in a shell command.
+7. **STRICT SHELL WHITELIST:** You may ONLY run commands starting with these prefixes:
+   - `test` (e.g. `test -d ".git"`)
+   - `git ` (e.g. `git status`)
+   - `gradle `
+   - `./gradlew `
+   - `chmod +x gradlew`
+   **DO NOT** attempt any other commands (no `ls`, `pwd`, `rm`, `curl`, `ssh`, etc.). If a command is not on this list, you CANNOT run it.
 """
 
 def get_inherited_prompt(agent_role: str, agent_protocol: str, agent_rules: str = "") -> str:
