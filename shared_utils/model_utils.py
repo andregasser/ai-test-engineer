@@ -17,8 +17,8 @@ _resilient_retry = retry(
         httpx.NetworkError,
         httpx.RemoteProtocolError,
     )),
-    wait=wait_exponential_jitter(initial=2, max=120, jitter=1),
-    stop=stop_after_attempt(15),
+    wait=wait_exponential_jitter(initial=15, max=60, jitter=1),
+    stop=stop_after_attempt(5),
     reraise=True
 )
 
