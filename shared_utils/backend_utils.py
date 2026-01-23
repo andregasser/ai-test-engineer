@@ -20,13 +20,24 @@ class HostSandboxBackend(FilesystemBackend, SandboxBackendProtocol):
         return self._id
 
     def execute(self, command: str) -> ExecuteResponse:
-        """Executes a whitelisted command on the host machine within the sandbox root."""
+        """
+        Executes a whitelisted command on the host machine within the sandbox root.
+        
+        ALLOWED COMMANDS:
+        - git ...
+        - gradle ...
+        - ./gradlew ...
+        - chmod +x gradlew
+        - test ...
+        
+        Any other command (e.g. grep, ls, find, cat) is FORBIDDEN and will fail.
+        """
         try:
             # Command Whitelist Check
             allowed_prefixes = ("test", "git ", "gradle ", "./gradlew ", "chmod +x gradlew")
             if not any(command.strip().startswith(prefix) for prefix in allowed_prefixes):
                 return ExecuteResponse(
-                    output=f"Security Error: Command '{command}' is not allowed. Only 'git', 'gradle', and './gradlew' are permitted.",
+                    output=f"Security Error: Command '{command}' is not allowed. Only 'git', 'gradle', './gradlew', and 'test' commands are permitted.",
                     exit_code=1,
                     truncated=False
                 )
