@@ -69,9 +69,15 @@ ORCHESTRATOR_SYSTEM_PROMPT = get_inherited_prompt(ORCHESTRATOR_ROLE, ORCHESTRATO
 @tool(args_schema=AgentReport)
 def submit_agent_report(**kwargs):
     """Finalizes the Orchestrator's work and returns the structured report."""
-    initial = kwargs.get('initial_coverage')
-    final = kwargs.get('final_coverage')
-    delta = kwargs.get('coverage_delta')
+    initial = kwargs.get('initial_coverage', 0.0)
+    final = kwargs.get('final_coverage', 0.0)
+    
+    # Recalculate delta to ensure consistency (0.0 - 1.0 range)
+    delta = final - initial
+    
+    # Update the value in the report
+    kwargs['coverage_delta'] = delta
+    
     logger.info(f"🏁 Orchestrator finished. Coverage: {initial:.2%} -> {final:.2%} (Delta: {delta:+.2%})")
     return kwargs
 
