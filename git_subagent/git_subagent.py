@@ -1,3 +1,4 @@
+import subprocess
 from langchain_core.tools import tool
 from shared_utils.prompt_utils import get_inherited_prompt
 from shared_utils.schema_utils import GitAgentOutput
@@ -5,9 +6,10 @@ from shared_utils.schema_utils import GitAgentOutput
 GIT_ROLE = "You are a Git specialist agent working inside a sandboxed environment."
 
 GIT_PROTOCOL = """
-1. Use the `shell` tool to run git commands (clone, checkout, commit, push).
-2. All operations should happen within the logical root (/).
-3. Return a concise summary of what was achieved.
+1. **BRANCHING:** You MUST use the `ensure_branch` tool to switch branches. This tool handles creation vs checkout logic automatically.
+2. Use the `shell` tool to run other git commands (clone, commit, push) if needed.
+3. All operations should happen within the logical root (/).
+4. Return a concise summary of what was achieved.
 """
 
 GIT_RULES = """
@@ -25,18 +27,47 @@ from shared_utils.logger import get_logger
 
 logger = get_logger("git-subagent")
 
+@tool
+def ensure_branch(branch_name: str, project_root: str = ".") -> str:
+    """
+    Checks if a branch exists locally. 
+    If it exists, checks it out. 
+    If not, creates it (git checkout -b) and checks it out.
+    """
+    try:
+        # Check if branch exists
+        check_cmd = ["git", "branch", "--list", branch_name]
+        result = subprocess.run(check_cmd, cwd=project_root, capture_output=True, text=True, check=True)
+        
+        if branch_name in result.stdout:
+            # Branch exists, simply checkout
+            cmd = ["git", "checkout", branch_name]
+            action = "checked out existing"
+        else:
+            # Branch does not exist, create and checkout
+            cmd = ["git", "checkout", "-b", branch_name]
+            action = "created and checked out"
+            
+        subprocess.run(cmd, cwd=project_root, capture_output=True, text=True, check=True)
+        return f"Successfully {action} branch '{branch_name}'."
+        
+    except subprocess.CalledProcessError as e:
+        return f"Error managing branch '{branch_name}': {e.stderr}"
+    except Exception as e:
+        return f"Unexpected error: {str(e)}"
+
 @tool(args_schema=GitAgentOutput)
 def submit_git_output(**kwargs):
     """Finalizes the Git agent's work and returns the structured result."""
     logger.info(f"✅ Git operation finished with status: {kwargs.get('status')}")
     return kwargs
 
-def get_git_subagent():
+def get_git_subagent(project_root: str):
     """Factory function to create the Git Subagent."""
     logger.info("🛠️  Initializing Git Subagent...")
     return {
         "name": "git-subagent",
         "description": "Handles repository management: cloning, checking out branches, committing, and pushing.",
         "system_prompt": GIT_SYSTEM_PROMPT,
-        "tools": [submit_git_output],
+        "tools": [ensure_branch, submit_git_output],
     }
