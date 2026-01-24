@@ -5,6 +5,8 @@ load_dotenv()
 import langchain
 import os
 import config
+import time
+import argparse
 from orchestrator_agent.orchestrator_agent import get_orchestrator_agent
 
 langchain.debug = True
@@ -85,29 +87,36 @@ def run_coverage_optimization(repo_url: str, branch: str | None, target_coverage
 if __name__ == "__main__":
     import json
 
-    # --- CONFIGURATION SECTION ---
-    # Repo details
-    REPO_URL = "ssh://git@code.swisscom.com:2222/swisscom/tsp/my-ai/backend/myai-integration-backend.git"
-    BRANCH = "feature/acm-service-ai-tests-2026-01-19"
-    TARGET_COVERAGE = 1.00
+    parser = argparse.ArgumentParser(description="AI Test Engineer - Coverage Optimization Runner")
 
-    # Scope control:
-    # List of module paths or None
-    # Example: (e.g., ["fancy-modules/my-module"])
-    TARGET_MODULES = ["services/acm-service"]
+    parser.add_argument("--repo-url", required=True, help="SSH or HTTP URL of the git repository.")
+    parser.add_argument("--branch", required=False, help="Specific branch to work on (optional).")
+    parser.add_argument("--target-coverage", type=float, default=0.80, help="Target coverage percentage (0.0 to 1.0). Default: 0.80")
+    
+    parser.add_argument("--target-modules", nargs="*", help="List of specific modules to target (space separated).")
+    parser.add_argument("--target-packages", nargs="*", help="List of specific packages to target (space separated).")
+    parser.add_argument("--target-classes", nargs="*", help="List of specific fully qualified class names to target (space separated).")
+    
+    parser.add_argument("--test-type", default="Unit Tests", choices=["Unit Tests", "Integration Tests", "Both"], 
+                        help="Type of tests to generate. Default: 'Unit Tests'")
 
-    # List of package names or None
-    # Exmaple: ["com.foo.bar"]
-    TARGET_PACKAGES = None
+    args = parser.parse_args()
 
-    # List of specific fully qualified class names to target or None
-    # Example: ["com.foo.bar.MyCustomService"]
-    TARGET_CLASSES = None
+    # --- CONFIGURATION FROM ARGS ---
+    REPO_URL = args.repo_url
+    BRANCH = args.branch
+    TARGET_COVERAGE = args.target_coverage
+    TARGET_MODULES = args.target_modules
+    TARGET_PACKAGES = args.target_packages
+    TARGET_CLASSES = args.target_classes
+    TEST_TYPE = args.test_type
+    # -------------------------------
 
-    # Type control: "Unit Tests", "Integration Tests", or "Both"
-    TEST_TYPE = "Both"
-    # -----------------------------
-
+    print(f"🚀 Starting Coverage Optimization for {REPO_URL}")
+    print(f"🎯 Target Coverage: {TARGET_COVERAGE}")
+    if BRANCH:
+        print(f"🌿 Branch: {BRANCH}")
+    
     result = run_coverage_optimization(
         repo_url=REPO_URL,
         branch=BRANCH,
@@ -120,7 +129,32 @@ if __name__ == "__main__":
 
     # Process the output
     try:
-        final_output = result["messages"][-1].content
+        final_output = None
+        # Iterate backwards to find the final report
+        for msg in reversed(result["messages"]):
+            # Case 1: ToolMessage from submit_agent_report
+            if msg.type == "tool" and msg.name == "submit_agent_report":
+                final_output = msg.content
+                break
+            # Case 2: AIMessage containing the JSON directly (fallback)
+            if msg.type == "ai" and isinstance(msg.content, str) and "termination_reason" in msg.content:
+                final_output = msg.content
+                break
+        
+        if not final_output:
+            # Fallback: Just take the last string content we can find
+            for msg in reversed(result["messages"]):
+                if isinstance(msg.content, str) and msg.content.strip():
+                    final_output = msg.content
+                    break
+        
+        if not final_output:
+             raise ValueError("No valid output content found in messages.")
+
+        # Ensure final_output is a string before string manipulation
+        if not isinstance(final_output, str):
+            final_output = json.dumps(final_output)
+
         # Attempt to clean up potential markdown formatting if the model slipped
         cleaned_output = final_output.replace("```json", "").replace("```", "").strip()
         report_data = json.loads(cleaned_output)
@@ -140,5 +174,6 @@ if __name__ == "__main__":
         print(final_output)
     except Exception as e:
         print(f"\n❌ Error processing report: {e}")
-        print("Raw output:")
-        print(result["messages"][-1].content)
+        # print("Raw output:")
+        # print(result["messages"][-1].content) # Unsafe
+        print("Last message content:", result["messages"][-1].content)
