@@ -7,7 +7,11 @@ import os
 import config
 import time
 import argparse
+import json
 from orchestrator_agent.orchestrator_agent import get_orchestrator_agent
+from shared_utils.logger import get_logger
+
+logger = get_logger("runner")
 
 langchain.debug = True
 
@@ -66,7 +70,7 @@ def run_coverage_optimization(repo_url: str, branch: str | None, target_coverage
                 # but could use json.loads if preferred for robustness.
                 if '"termination_reason": "model_overloaded"' in last_content:
                     if attempt < max_retries - 1:
-                        print(f"⚠️  Model overloaded. Retrying in {retry_delay}s... (Attempt {attempt + 1}/{max_retries})")
+                        logger.warning(f"⚠️  Model overloaded. Retrying in {retry_delay}s... (Attempt {attempt + 1}/{max_retries})")
                         time.sleep(retry_delay)
                         continue
             
@@ -74,9 +78,9 @@ def run_coverage_optimization(repo_url: str, branch: str | None, target_coverage
 
         except Exception as e:
             # Optional: Catch specific transport errors here if they bubble up
-            print(f"❌ An error occurred during execution: {e}")
+            logger.error(f"❌ An error occurred during execution: {e}")
             if attempt < max_retries - 1:
-                 print(f"🔄 Retrying in {retry_delay}s... (Attempt {attempt + 1}/{max_retries})")
+                 logger.info(f"🔄 Retrying in {retry_delay}s... (Attempt {attempt + 1}/{max_retries})")
                  time.sleep(retry_delay)
             else:
                  raise e
@@ -85,8 +89,6 @@ def run_coverage_optimization(repo_url: str, branch: str | None, target_coverage
 
 
 if __name__ == "__main__":
-    import json
-
     parser = argparse.ArgumentParser(description="AI Test Engineer - Coverage Optimization Runner")
 
     parser.add_argument("--repo-url", required=True, help="SSH or HTTP URL of the git repository.")
@@ -112,10 +114,10 @@ if __name__ == "__main__":
     TEST_TYPE = args.test_type
     # -------------------------------
 
-    print(f"🚀 Starting Coverage Optimization for {REPO_URL}")
-    print(f"🎯 Target Coverage: {TARGET_COVERAGE}")
+    logger.info(f"🚀 Starting Coverage Optimization for {REPO_URL}")
+    logger.info(f"🎯 Target Coverage: {TARGET_COVERAGE}")
     if BRANCH:
-        print(f"🌿 Branch: {BRANCH}")
+        logger.info(f"🌿 Branch: {BRANCH}")
     
     result = run_coverage_optimization(
         repo_url=REPO_URL,
@@ -158,22 +160,23 @@ if __name__ == "__main__":
         # Attempt to clean up potential markdown formatting if the model slipped
         cleaned_output = final_output.replace("```json", "").replace("```", "").strip()
         report_data = json.loads(cleaned_output)
-        print("\n" + "=" * 50)
-        print("📊 FINAL AGENT REPORT")
-        print("=" * 50)
-        print(json.dumps(report_data, indent=4))
-        print("=" * 50)
+        
+        logger.info("\n" + "=" * 50)
+        logger.info("📊 FINAL AGENT REPORT")
+        logger.info("=" * 50)
+        logger.info(json.dumps(report_data, indent=4))
+        logger.info("=" * 50)
 
         # Save to file
         with open("agent_report.json", "w") as f:
             json.dump(report_data, f, indent=4)
-        print("✅ Report saved to agent_report.json")
+        logger.info("✅ Report saved to agent_report.json")
 
     except json.JSONDecodeError:
-        print("\n⚠️  Could not parse JSON report. Raw output:")
-        print(final_output)
+        logger.warning("\n⚠️  Could not parse JSON report. Raw output:")
+        logger.warning(final_output)
     except Exception as e:
-        print(f"\n❌ Error processing report: {e}")
+        logger.error(f"\n❌ Error processing report: {e}")
         # print("Raw output:")
         # print(result["messages"][-1].content) # Unsafe
-        print("Last message content:", result["messages"][-1].content)
+        logger.error(f"Last message content: {result['messages'][-1].content}")
