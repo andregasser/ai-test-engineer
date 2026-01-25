@@ -120,7 +120,7 @@ def get_orchestrator_agent(project_root: str):
     
     # Dynamically create subagents
     subagents = [
-        get_git_subagent(),
+        get_git_subagent(project_root),
         get_test_writer_subagent(project_root),
         get_reviewer_subagent(project_root),
         get_build_subagent(),
