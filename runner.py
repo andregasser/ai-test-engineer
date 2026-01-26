@@ -17,22 +17,24 @@ langchain.debug = True
 
 
 def run_coverage_optimization(repo_url: str, branch: str | None, target_coverage: float,
+                              workspace_dir: str,
                               target_modules: list[str] = None,
                               target_packages: list[str] = None,
                               target_classes: list[str] = None,
                               test_type: str = "Unit Tests"):
-    # 1. Determine Project Path
+    # 1. Determine Project Path within Workspace
     repo_name = repo_url.split("/")[-1].replace(".git", "")
-    project_path = os.path.join(config.WORKSPACE_DIR, repo_name)
+    project_path = os.path.abspath(os.path.join(workspace_dir, repo_name))
 
     # Ensure the directory exists so the backend can initialize
     os.makedirs(project_path, exist_ok=True)
 
-    # 2. Initialize Agent
+    # 2. Initialize Agent anchored to the project path
     orchestrator_agent = get_orchestrator_agent(project_path)
 
     # Build a descriptive instruction for the orchestrator
-    instruction = f"Improve coverage for {repo_url} on branch {branch} to {target_coverage}"
+    instruction = f"Improve coverage for {repo_url} on branch {branch} to {target_coverage}. " \
+                  f"Clone the repository into the current directory (.) if it does not exist."
 
     if target_modules:
         instruction += f"\n- TARGET MODULES: {', '.join(target_modules)}"
@@ -66,8 +68,6 @@ def run_coverage_optimization(repo_url: str, branch: str | None, target_coverage
             # Check for specific termination reason in the output
             if result and "messages" in result and result["messages"]:
                 last_content = result["messages"][-1].content
-                # Simple string check to avoid full parse overhead inside the loop, 
-                # but could use json.loads if preferred for robustness.
                 if '"termination_reason": "model_overloaded"' in last_content:
                     if attempt < max_retries - 1:
                         logger.warning(f"⚠️  Model overloaded. Retrying in {retry_delay}s... (Attempt {attempt + 1}/{max_retries})")
@@ -77,7 +77,6 @@ def run_coverage_optimization(repo_url: str, branch: str | None, target_coverage
             return result
 
         except Exception as e:
-            # Optional: Catch specific transport errors here if they bubble up
             logger.error(f"❌ An error occurred during execution: {e}")
             if attempt < max_retries - 1:
                  logger.info(f"🔄 Retrying in {retry_delay}s... (Attempt {attempt + 1}/{max_retries})")
@@ -94,6 +93,7 @@ if __name__ == "__main__":
     parser.add_argument("--repo-url", required=True, help="SSH or HTTP URL of the git repository.")
     parser.add_argument("--branch", required=False, help="Specific branch to work on (optional).")
     parser.add_argument("--target-coverage", type=float, default=0.80, help="Target coverage percentage (0.0 to 1.0). Default: 0.80")
+    parser.add_argument("--workspace", required=True, help="The base workspace directory.")
     
     parser.add_argument("--target-modules", nargs="*", help="List of specific modules to target (space separated).")
     parser.add_argument("--target-packages", nargs="*", help="List of specific packages to target (space separated).")
@@ -108,6 +108,7 @@ if __name__ == "__main__":
     REPO_URL = args.repo_url
     BRANCH = args.branch
     TARGET_COVERAGE = args.target_coverage
+    WORKSPACE_DIR = os.path.abspath(args.workspace)
     TARGET_MODULES = args.target_modules
     TARGET_PACKAGES = args.target_packages
     TARGET_CLASSES = args.target_classes
@@ -115,6 +116,7 @@ if __name__ == "__main__":
     # -------------------------------
 
     logger.info(f"🚀 Starting Coverage Optimization for {REPO_URL}")
+    logger.info(f"📂 Workspace: {WORKSPACE_DIR}")
     logger.info(f"🎯 Target Coverage: {TARGET_COVERAGE}")
     if BRANCH:
         logger.info(f"🌿 Branch: {BRANCH}")
@@ -123,6 +125,7 @@ if __name__ == "__main__":
         repo_url=REPO_URL,
         branch=BRANCH,
         target_coverage=TARGET_COVERAGE,
+        workspace_dir=WORKSPACE_DIR,
         target_modules=TARGET_MODULES,
         target_packages=TARGET_PACKAGES,
         target_classes=TARGET_CLASSES,
@@ -132,19 +135,15 @@ if __name__ == "__main__":
     # Process the output
     try:
         final_output = None
-        # Iterate backwards to find the final report
         for msg in reversed(result["messages"]):
-            # Case 1: ToolMessage from submit_agent_report
             if msg.type == "tool" and msg.name == "submit_agent_report":
                 final_output = msg.content
                 break
-            # Case 2: AIMessage containing the JSON directly (fallback)
             if msg.type == "ai" and isinstance(msg.content, str) and "termination_reason" in msg.content:
                 final_output = msg.content
                 break
         
         if not final_output:
-            # Fallback: Just take the last string content we can find
             for msg in reversed(result["messages"]):
                 if isinstance(msg.content, str) and msg.content.strip():
                     final_output = msg.content
@@ -153,11 +152,9 @@ if __name__ == "__main__":
         if not final_output:
              raise ValueError("No valid output content found in messages.")
 
-        # Ensure final_output is a string before string manipulation
         if not isinstance(final_output, str):
             final_output = json.dumps(final_output)
 
-        # Attempt to clean up potential markdown formatting if the model slipped
         cleaned_output = final_output.replace("```json", "").replace("```", "").strip()
         report_data = json.loads(cleaned_output)
         
@@ -167,16 +164,10 @@ if __name__ == "__main__":
         logger.info(json.dumps(report_data, indent=4))
         logger.info("=" * 50)
 
-        # Save to file
         with open("agent_report.json", "w") as f:
             json.dump(report_data, f, indent=4)
         logger.info("✅ Report saved to agent_report.json")
 
-    except json.JSONDecodeError:
-        logger.warning("\n⚠️  Could not parse JSON report. Raw output:")
-        logger.warning(final_output)
     except Exception as e:
         logger.error(f"\n❌ Error processing report: {e}")
-        # print("Raw output:")
-        # print(result["messages"][-1].content) # Unsafe
         logger.error(f"Last message content: {result['messages'][-1].content}")
