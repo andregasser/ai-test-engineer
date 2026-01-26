@@ -118,6 +118,7 @@ if __name__ == "__main__":
     logger.info(f"🚀 Starting Coverage Optimization for {REPO_URL}")
     logger.info(f"📂 Workspace: {WORKSPACE_DIR}")
     logger.info(f"🎯 Target Coverage: {TARGET_COVERAGE}")
+    logger.info(f"🧪 Test Type: {TEST_TYPE}")
     if BRANCH:
         logger.info(f"🌿 Branch: {BRANCH}")
     

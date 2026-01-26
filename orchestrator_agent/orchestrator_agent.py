@@ -3,6 +3,8 @@ import json
 from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableLambda
 from langchain_core.tools import tool
+
+from shared_utils.backend_utils import HostSandboxBackend
 from shared_utils.schema_utils import AgentReport
 
 from deepagents import create_deep_agent

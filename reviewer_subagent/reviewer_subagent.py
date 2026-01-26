@@ -1,5 +1,4 @@
 import subprocess
-import json
 from pathlib import Path
 from langchain_core.tools import tool
 from shared_utils.prompt_utils import get_inherited_prompt
@@ -8,7 +7,7 @@ from shared_utils.logger import get_logger
 
 logger = get_logger("reviewer-subagent")
 
-REVIEWER_ROLE = "You are a strict QA Compliance Officer for a Java project. You DO NOT write code. You only audit it. Your primary source of truth is the `TESTING_STANDARDS.md` file."
+REVIEWER_ROLE = "You are a strict QA Compliance Officer for a Java project."
 
 REVIEWER_PROTOCOL = """
 1. **INTEGRITY CHECK:** Verify that only allowed files have been modified in the workspace.
@@ -33,7 +32,7 @@ REVIEWER_RULES = """
   - Tagging Audit fails (missing `@Tag("ai-generated")`).
   - `System.out.println` is used in tests.
   - Assertions are weak, or naming conventions are violated.
-- **NO EDITS:** You cannot modify the code yourself. Provide actionable feedback instead.
+- **NO EDITS:** You DO NOT write code. You only audit it. Provide actionable feedback instead.
 - **SANDBOX:** You operate within a sandboxed directory. All paths are relative to your root (/).
 - **FINALIZE:** To finish your task, you **MUST** call the `submit_review_result` tool.
 """
